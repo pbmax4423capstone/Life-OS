@@ -1,3 +1,5 @@
+import { supabase } from '@/lib/supabase'
+
 /**
  * Image Recognition Service
  * Sends images to Claude Vision, parses the result,
@@ -156,4 +158,3 @@ function mapToResult(
     rawOutput,
   }
 }
-import { supabase } from '@/lib/supabase'
