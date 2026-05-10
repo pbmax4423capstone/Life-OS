@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 
@@ -117,13 +117,64 @@ export function DomainModal({
   onClose: () => void
   children: JSX.Element
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const titleId = useRef(`domain-modal-title-${Math.random().toString(36).slice(2)}`)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+
   useEffect(() => {
     if (!open) return
+    previousFocusRef.current = document.activeElement as HTMLElement | null
+
+    const focusableSelector = [
+      'a[href]',
+      'button:not([disabled])',
+      'textarea:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(', ')
+
+    const focusFirstElement = () => {
+      const container = dialogRef.current
+      if (!container) return
+      const focusables = Array.from(container.querySelectorAll<HTMLElement>(focusableSelector))
+      if (focusables.length > 0) {
+        focusables[0].focus()
+      } else {
+        container.focus()
+      }
+    }
+
+    window.setTimeout(focusFirstElement, 0)
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
+      if (event.key !== 'Tab') return
+      const container = dialogRef.current
+      if (!container) return
+      const focusables = Array.from(container.querySelectorAll<HTMLElement>(focusableSelector))
+      if (focusables.length === 0) {
+        event.preventDefault()
+        return
+      }
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      const active = document.activeElement as HTMLElement | null
+      if (event.shiftKey) {
+        if (active === first || !active) {
+          event.preventDefault()
+          last.focus()
+        }
+      } else if (active === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      previousFocusRef.current?.focus()
+    }
   }, [open, onClose])
 
   if (!open) return null
@@ -131,9 +182,16 @@ export function DomainModal({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <button className="absolute inset-0 bg-black/70" onClick={onClose} aria-label="Close modal overlay" />
-      <div className="relative w-full max-w-2xl card bg-slate-900 border-slate-700 max-h-[90vh] overflow-y-auto">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId.current}
+        tabIndex={-1}
+        className="relative w-full max-w-2xl card bg-slate-900 border-slate-700 max-h-[90vh] overflow-y-auto"
+      >
         <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm p-4 border-b border-slate-700 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-100">{title}</h3>
+          <h3 id={titleId.current} className="text-base font-semibold text-slate-100">{title}</h3>
           <button className="btn-ghost p-1.5" onClick={onClose} aria-label="Close modal">
             <X size={16} />
           </button>

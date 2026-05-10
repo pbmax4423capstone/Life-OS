@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react'
@@ -37,6 +37,23 @@ const ANTHROPIC_API_VERSION = '2023-06-01'
 const RESUME_SYSTEM = 'You are an expert resume writer. Given the base resume and job description below, rewrite the resume to maximize ATS score and relevance for this specific role. Preserve all factual information — never invent experience or skills. Tailor the summary, reorder bullet points by relevance, and naturally incorporate keywords from the job description. Return the full rewritten resume as clean plain text.'
 const COVER_SYSTEM = 'You are an expert cover letter writer. Write a compelling, personalized cover letter for this job application based on the resume provided. Be specific, confident, and concise — three paragraphs max. Match the tone to the company. Return plain text only.'
 
+function parseOptionalNumber(value: string): number | null {
+  if (!value.trim()) return null
+  const parsed = Number.parseFloat(value)
+  if (!Number.isFinite(parsed)) {
+    throw new Error('Numeric field must be a valid number.')
+  }
+  return parsed
+}
+
+function parseRequiredNumber(value: string, fieldName: string): number {
+  const parsed = parseOptionalNumber(value)
+  if (parsed === null) {
+    throw new Error(`${fieldName} is required.`)
+  }
+  return parsed
+}
+
 export default function JobsPage() {
   const userId = useAuthStore((s) => s.user?.id)
   const queryClient = useQueryClient()
@@ -58,11 +75,13 @@ export default function JobsPage() {
   const [jobDescription, setJobDescription] = useState('')
   const [generatedResume, setGeneratedResume] = useState('')
   const [generatingResume, setGeneratingResume] = useState(false)
+  const resumeRequestInFlight = useRef(false)
 
   const [coverResumeId, setCoverResumeId] = useState('')
   const [coverJobDescription, setCoverJobDescription] = useState('')
   const [generatedCover, setGeneratedCover] = useState('')
   const [generatingCover, setGeneratingCover] = useState(false)
+  const coverRequestInFlight = useRef(false)
 
   const [certModalOpen, setCertModalOpen] = useState(false)
   const [editCertId, setEditCertId] = useState<string | null>(null)
@@ -74,11 +93,38 @@ export default function JobsPage() {
 
   const companiesQuery = useQuery({ queryKey: ['jobs-companies', userId], enabled: Boolean(userId), queryFn: async () => { const { data, error } = await db.from('companies').select('id, company_name').eq('user_id', userId as string); if (error) throw new Error(error.message); return (data ?? []) as unknown as Company[] } })
   const applicationsQuery = useQuery({ queryKey: ['jobs-applications', userId], enabled: Boolean(userId), queryFn: async () => { const { data, error } = await db.from('job_applications').select('id, company_id, job_title, location, work_type, salary_min, salary_max, job_url, date_applied, status, notes, next_action, next_action_date').eq('user_id', userId as string).eq('is_deleted', false).order('date_applied', { ascending: false }); if (error) throw new Error(error.message); return (data ?? []) as unknown as JobApplication[] } })
-  const interviewsQuery = useQuery({ queryKey: ['jobs-interviews', userId], enabled: Boolean(userId), queryFn: async () => { const { data, error } = await db.from('interview_rounds').select('id, application_id, round_type, interview_date, interviewer_name, outcome, notes').order('interview_date'); if (error) throw new Error(error.message); return (data ?? []) as unknown as InterviewRound[] } })
+  const interviewsQuery = useQuery({
+    queryKey: ['jobs-interviews', userId],
+    enabled: Boolean(userId),
+    queryFn: async () => {
+      const applicationIds = (applicationsQuery.data ?? []).map((application) => application.id)
+      if (applicationIds.length === 0) return []
+      const { data, error } = await db
+        .from('interview_rounds')
+        .select('id, application_id, round_type, interview_date, interviewer_name, outcome, notes')
+        .in('application_id', applicationIds)
+        .order('interview_date')
+      if (error) throw new Error(error.message)
+      return (data ?? []) as unknown as InterviewRound[]
+    },
+  })
   const contactsQuery = useQuery({ queryKey: ['jobs-contacts', userId], enabled: Boolean(userId), queryFn: async () => { const { data, error } = await db.from('contacts').select('id, full_name, title, company, email, phone, linkedin_url, relationship_type, last_contacted_date, notes').eq('user_id', userId as string).eq('is_deleted', false).order('full_name'); if (error) throw new Error(error.message); return (data ?? []) as unknown as Contact[] } })
-  const appContactsQuery = useQuery({ queryKey: ['jobs-app-contacts', userId], enabled: Boolean(userId), queryFn: async () => { const { data, error } = await db.from('application_contacts').select('id, application_id, contact_id'); if (error) throw new Error(error.message); return (data ?? []) as unknown as ApplicationContact[] } })
+  const appContactsQuery = useQuery({
+    queryKey: ['jobs-app-contacts', userId],
+    enabled: Boolean(userId),
+    queryFn: async () => {
+      const applicationIds = (applicationsQuery.data ?? []).map((application) => application.id)
+      if (applicationIds.length === 0) return []
+      const { data, error } = await db
+        .from('application_contacts')
+        .select('id, application_id, contact_id')
+        .in('application_id', applicationIds)
+      if (error) throw new Error(error.message)
+      return (data ?? []) as unknown as ApplicationContact[]
+    },
+  })
   const resumesQuery = useQuery({ queryKey: ['jobs-resumes', userId], enabled: Boolean(userId), queryFn: async () => { const { data, error } = await db.from('resumes').select('id, name, version, base_content, parent_resume_id, job_description_snippet, tags, created_at').eq('user_id', userId as string).order('created_at', { ascending: false }); if (error) throw new Error(error.message); return (data ?? []) as unknown as ResumeItem[] } })
-  const certsQuery = useQuery({ queryKey: ['jobs-certs', userId], enabled: Boolean(userId), queryFn: async () => { const { data, error } = await db.from('certifications').select('id, name, issuing_organization, issue_date, expiry_date, credential_id, credential_url, status, study_hours_completed, study_hours_target, notes, is_active').eq('user_id', userId as string).order('expiry_date'); if (error) throw new Error(error.message); return (data ?? []) as unknown as Certification[] } })
+  const certsQuery = useQuery({ queryKey: ['jobs-certs', userId], enabled: Boolean(userId), queryFn: async () => { const { data, error } = await db.from('certifications').select('id, name, issuing_organization, issue_date, expiry_date, credential_id, credential_url, status, study_hours_completed, study_hours_target, notes, is_active').eq('user_id', userId as string).eq('is_active', true).order('expiry_date'); if (error) throw new Error(error.message); return (data ?? []) as unknown as Certification[] } })
 
   const invalidate = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['jobs-companies', userId] }),
@@ -119,8 +165,8 @@ export default function JobsPage() {
         job_title: appForm.job_title.trim(),
         location: appForm.location || null,
         work_type: appForm.work_type,
-        salary_min: appForm.salary_min ? Number(appForm.salary_min) : null,
-        salary_max: appForm.salary_max ? Number(appForm.salary_max) : null,
+        salary_min: parseOptionalNumber(appForm.salary_min),
+        salary_max: parseOptionalNumber(appForm.salary_max),
         job_url: appForm.job_url || null,
         date_applied: appForm.date_applied || null,
         status: appForm.status,
@@ -129,7 +175,7 @@ export default function JobsPage() {
         next_action_date: appForm.next_action_date || null,
       }
       if (editAppId) {
-        const { error } = await db.from('job_applications').update(payload).eq('id', editAppId)
+        const { error } = await db.from('job_applications').update(payload).eq('id', editAppId).eq('user_id', userId as string)
         if (error) throw new Error(error.message)
       } else {
         const { error } = await db.from('job_applications').insert(payload)
@@ -139,7 +185,7 @@ export default function JobsPage() {
     onSuccess: async () => { toast.success(editAppId ? 'Application updated.' : 'Application added.'); setAppModalOpen(false); setEditAppId(null); setAppForm({ job_title: '', company_name: '', location: '', work_type: 'remote', salary_min: '', salary_max: '', job_url: '', date_applied: '', status: 'saved', notes: '', next_action: '', next_action_date: '' }); await invalidate() },
     onError: (error: Error) => toast.error(error.message),
   })
-  const deleteAppMutation = useMutation({ mutationFn: async (id: string) => { const { error } = await db.from('job_applications').update({ is_deleted: true }).eq('id', id); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Application deleted.'); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
+  const deleteAppMutation = useMutation({ mutationFn: async (id: string) => { const { error } = await db.from('job_applications').update({ is_deleted: true }).eq('id', id).eq('user_id', userId as string); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Application deleted.'); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
   const addInterviewMutation = useMutation({ mutationFn: async () => { const { error } = await db.from('interview_rounds').insert({ application_id: interviewModal.application_id, round_type: interviewModal.round_type, interview_date: interviewModal.interview_date || null, interviewer_name: interviewModal.interviewer_name || null, outcome: interviewModal.outcome || null, notes: interviewModal.notes || null }); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Interview round added.'); setInterviewModal({ open: false, application_id: '', round_type: '', interview_date: '', interviewer_name: '', outcome: '', notes: '' }); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
   const addContactLinkMutation = useMutation({ mutationFn: async () => { const { error } = await db.from('application_contacts').insert({ application_id: linkContactModal.application_id, contact_id: linkContactModal.contact_id }); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Contact linked.'); setLinkContactModal({ open: false, application_id: '', contact_id: '' }); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
 
@@ -147,11 +193,11 @@ export default function JobsPage() {
   const saveGeneratedResumeMutation = useMutation({ mutationFn: async () => { const selected = resumes.find((resume) => resume.id === selectedBaseResumeId); if (!selected) throw new Error('Select base resume'); const { error } = await db.from('resumes').insert({ user_id: userId, name: `${selected.name} - tailored`, version: 'customized', parent_resume_id: selected.id, job_description_snippet: jobDescription.slice(0, 200), base_content: generatedResume }); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Customized resume saved.'); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
   const saveCoverMutation = useMutation({ mutationFn: async () => { const { error } = await db.from('ai_documents').insert({ user_id: userId, type: 'cover_letter', resume_id: coverResumeId || null, content: generatedCover }); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Cover letter saved.'); }, onError: (e: Error) => toast.error(e.message) })
 
-  const certMutation = useMutation({ mutationFn: async () => { const payload = { user_id: userId, name: certForm.name, issuing_organization: certForm.issuing_organization || null, issue_date: certForm.issue_date || null, expiry_date: certForm.expiry_date || null, credential_id: certForm.credential_id || null, credential_url: certForm.credential_url || null, status: certForm.status, study_hours_completed: certForm.study_hours_completed ? Number(certForm.study_hours_completed) : 0, study_hours_target: certForm.study_hours_target ? Number(certForm.study_hours_target) : 0, notes: certForm.notes || null, is_active: true }; if (editCertId) { const { error } = await db.from('certifications').update(payload).eq('id', editCertId); if (error) throw new Error(error.message) } else { const { error } = await db.from('certifications').insert(payload); if (error) throw new Error(error.message) } }, onSuccess: async () => { toast.success(editCertId ? 'Certification updated.' : 'Certification added.'); setCertModalOpen(false); setEditCertId(null); setCertForm({ name: '', issuing_organization: '', issue_date: '', expiry_date: '', credential_id: '', credential_url: '', status: 'in_progress', study_hours_completed: '', study_hours_target: '', notes: '' }); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
-  const archiveCertMutation = useMutation({ mutationFn: async (id: string) => { const { error } = await db.from('certifications').update({ is_active: false }).eq('id', id); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Certification archived.'); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
+  const certMutation = useMutation({ mutationFn: async () => { const payload = { user_id: userId, name: certForm.name, issuing_organization: certForm.issuing_organization || null, issue_date: certForm.issue_date || null, expiry_date: certForm.expiry_date || null, credential_id: certForm.credential_id || null, credential_url: certForm.credential_url || null, status: certForm.status, study_hours_completed: parseOptionalNumber(certForm.study_hours_completed) ?? 0, study_hours_target: parseOptionalNumber(certForm.study_hours_target) ?? 0, notes: certForm.notes || null, is_active: true }; if (editCertId) { const { error } = await db.from('certifications').update(payload).eq('id', editCertId).eq('user_id', userId as string); if (error) throw new Error(error.message) } else { const { error } = await db.from('certifications').insert(payload); if (error) throw new Error(error.message) } }, onSuccess: async () => { toast.success(editCertId ? 'Certification updated.' : 'Certification added.'); setCertModalOpen(false); setEditCertId(null); setCertForm({ name: '', issuing_organization: '', issue_date: '', expiry_date: '', credential_id: '', credential_url: '', status: 'in_progress', study_hours_completed: '', study_hours_target: '', notes: '' }); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
+  const archiveCertMutation = useMutation({ mutationFn: async (id: string) => { const { error } = await db.from('certifications').update({ is_active: false }).eq('id', id).eq('user_id', userId as string); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Certification archived.'); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
 
-  const contactMutation = useMutation({ mutationFn: async () => { const payload = { user_id: userId, full_name: contactForm.full_name, title: contactForm.title || null, company: contactForm.company || null, email: contactForm.email || null, phone: contactForm.phone || null, linkedin_url: contactForm.linkedin_url || null, relationship_type: contactForm.relationship_type || null, last_contacted_date: contactForm.last_contacted_date || null, notes: contactForm.notes || null }; if (editContactId) { const { error } = await db.from('contacts').update(payload).eq('id', editContactId); if (error) throw new Error(error.message) } else { const { error } = await db.from('contacts').insert(payload); if (error) throw new Error(error.message) } }, onSuccess: async () => { toast.success(editContactId ? 'Contact updated.' : 'Contact added.'); setContactModalOpen(false); setEditContactId(null); setContactForm({ full_name: '', title: '', company: '', email: '', phone: '', linkedin_url: '', relationship_type: 'other', last_contacted_date: '', notes: '' }); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
-  const deleteContactMutation = useMutation({ mutationFn: async (id: string) => { const { error } = await db.from('contacts').update({ is_deleted: true }).eq('id', id); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Contact deleted.'); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
+  const contactMutation = useMutation({ mutationFn: async () => { const payload = { user_id: userId, full_name: contactForm.full_name, title: contactForm.title || null, company: contactForm.company || null, email: contactForm.email || null, phone: contactForm.phone || null, linkedin_url: contactForm.linkedin_url || null, relationship_type: contactForm.relationship_type || null, last_contacted_date: contactForm.last_contacted_date || null, notes: contactForm.notes || null }; if (editContactId) { const { error } = await db.from('contacts').update(payload).eq('id', editContactId).eq('user_id', userId as string); if (error) throw new Error(error.message) } else { const { error } = await db.from('contacts').insert(payload); if (error) throw new Error(error.message) } }, onSuccess: async () => { toast.success(editContactId ? 'Contact updated.' : 'Contact added.'); setContactModalOpen(false); setEditContactId(null); setContactForm({ full_name: '', title: '', company: '', email: '', phone: '', linkedin_url: '', relationship_type: 'other', last_contacted_date: '', notes: '' }); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
+  const deleteContactMutation = useMutation({ mutationFn: async (id: string) => { const { error } = await db.from('contacts').update({ is_deleted: true }).eq('id', id).eq('user_id', userId as string); if (error) throw new Error(error.message) }, onSuccess: async () => { toast.success('Contact deleted.'); await invalidate() }, onError: (e: Error) => toast.error(e.message) })
 
   const streamClaude = async ({ system, userText, onChunk }: { system: string; userText: string; onChunk: (chunk: string) => void }) => {
     const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY as string | undefined
@@ -188,34 +234,40 @@ export default function JobsPage() {
   }
 
   const generateResume = async () => {
+    if (resumeRequestInFlight.current) return
     if (!selectedBaseResumeId || !jobDescription.trim()) { toast.error('Select base resume and provide job description.'); return }
     const base = resumes.find((resume) => resume.id === selectedBaseResumeId)
     if (!base || !base.base_content) { toast.error('Selected base resume has no base content.'); return }
     setGeneratedResume('')
     setGeneratingResume(true)
+    resumeRequestInFlight.current = true
     try {
       await streamClaude({ system: RESUME_SYSTEM, userText: `BASE RESUME:\n${base.base_content}\n\nJOB DESCRIPTION:\n${jobDescription}`, onChunk: (chunk) => setGeneratedResume((prev) => prev + chunk) })
       toast.success('Resume generated.')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed generating resume')
+    } catch {
+      toast.error('AI request failed. Please try again in a moment.')
     } finally {
       setGeneratingResume(false)
+      resumeRequestInFlight.current = false
     }
   }
 
   const generateCover = async () => {
+    if (coverRequestInFlight.current) return
     if (!coverResumeId || !coverJobDescription.trim()) { toast.error('Select resume and provide job description.'); return }
     const resume = resumes.find((item) => item.id === coverResumeId)
     if (!resume || !resume.base_content) { toast.error('Selected resume has no content.'); return }
     setGeneratedCover('')
     setGeneratingCover(true)
+    coverRequestInFlight.current = true
     try {
       await streamClaude({ system: COVER_SYSTEM, userText: `RESUME:\n${resume.base_content}\n\nJOB DESCRIPTION:\n${coverJobDescription}`, onChunk: (chunk) => setGeneratedCover((prev) => prev + chunk) })
       toast.success('Cover letter generated.')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed generating cover letter')
+    } catch {
+      toast.error('AI request failed. Please try again in a moment.')
     } finally {
       setGeneratingCover(false)
+      coverRequestInFlight.current = false
     }
   }
 

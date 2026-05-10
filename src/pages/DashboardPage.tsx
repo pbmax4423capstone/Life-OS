@@ -20,8 +20,19 @@ export default function DashboardPage() {
     if (!user) return
     const load = async () => {
       const [{ data: accs }, { data: pmts }] = await Promise.all([
-        supabase.from('financial_accounts').select('*').eq('owner_id', user.id).is('deleted_at', null).order('sort_order'),
-        supabase.from('scheduled_payments').select('*').eq('owner_id', user.id).is('deleted_at', null).order('next_due_date').limit(5),
+        supabase
+          .from('financial_accounts')
+          .select('id, owner_id, account_type, status, institution_name, nickname, last_four, current_balance, available_balance, credit_limit, original_amount, interest_rate, rewards_balance, rewards_unit, rewards_cpp, color, icon, sort_order, deleted_at, created_at, updated_at')
+          .eq('owner_id', user.id)
+          .is('deleted_at', null)
+          .order('sort_order'),
+        supabase
+          .from('scheduled_payments')
+          .select('id, owner_id, from_account_id, to_account_id, payee_name, amount, frequency, next_due_date, end_date, status, auto_pay, memo, anchor_date, deleted_at, created_at, updated_at')
+          .eq('owner_id', user.id)
+          .is('deleted_at', null)
+          .order('next_due_date')
+          .limit(5),
       ])
       setAccounts(accs ?? [])
       setPayments(pmts ?? [])

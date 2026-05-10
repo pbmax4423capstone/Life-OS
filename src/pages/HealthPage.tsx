@@ -42,6 +42,14 @@ const STATUS_CLASS: Record<string, string> = {
   paid: 'bg-slate-500/20 text-slate-300 border-slate-500/40',
 }
 
+function parseFiniteNumber(value: string, fieldName: string): number {
+  const parsed = Number.parseFloat(value)
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${fieldName} must be a valid number.`)
+  }
+  return parsed
+}
+
 export default function HealthPage() {
   const userId = useAuthStore((s) => s.user?.id)
   const queryClient = useQueryClient()
@@ -89,7 +97,12 @@ export default function HealthPage() {
     queryKey: ['health-policy-members', userId],
     enabled: Boolean(userId),
     queryFn: async () => {
-      const { data, error } = await db.from('policy_members').select('id, policy_id, household_member_id, member_id_number, household_member:household_member_id(full_name, relationship)')
+      const policyIds = (policiesQuery.data ?? []).map((policy) => policy.id)
+      if (policyIds.length === 0) return []
+      const { data, error } = await db
+        .from('policy_members')
+        .select('id, policy_id, household_member_id, member_id_number, household_member:household_member_id(full_name, relationship)')
+        .in('policy_id', policyIds)
       if (error) throw new Error(error.message)
       return (data ?? []) as unknown as PolicyMember[]
     },
@@ -116,7 +129,12 @@ export default function HealthPage() {
     queryKey: ['health-prescriptions', userId],
     enabled: Boolean(userId),
     queryFn: async () => {
-      const { data, error } = await db.from('prescriptions').select('id, household_member_id, medication_name, dosage, frequency, prescriber_name, pharmacy_name, refills_remaining, last_filled_date, next_fill_date, cost_per_fill, notes, is_active').eq('user_id', userId as string).order('medication_name')
+      const { data, error } = await db
+        .from('prescriptions')
+        .select('id, household_member_id, medication_name, dosage, frequency, prescriber_name, pharmacy_name, refills_remaining, last_filled_date, next_fill_date, cost_per_fill, notes, is_active')
+        .eq('user_id', userId as string)
+        .eq('is_active', true)
+        .order('medication_name')
       if (error) throw new Error(error.message)
       return (data ?? []) as unknown as Prescription[]
     },
@@ -140,9 +158,9 @@ export default function HealthPage() {
 
   const policyMutation = useMutation({
     mutationFn: async () => {
-      const payload = { user_id: userId, insurer_name: policyForm.insurer_name.trim(), policy_number: policyForm.policy_number.trim(), plan_name: policyForm.plan_name.trim(), policy_type: policyForm.policy_type, premium_amount: Number(policyForm.premium_amount), premium_frequency: policyForm.premium_frequency.trim(), deductible: Number(policyForm.deductible), out_of_pocket_max: Number(policyForm.out_of_pocket_max), effective_date: policyForm.effective_date, renewal_date: policyForm.renewal_date }
+      const payload = { user_id: userId, insurer_name: policyForm.insurer_name.trim(), policy_number: policyForm.policy_number.trim(), plan_name: policyForm.plan_name.trim(), policy_type: policyForm.policy_type, premium_amount: parseFiniteNumber(policyForm.premium_amount, 'Premium amount'), premium_frequency: policyForm.premium_frequency.trim(), deductible: parseFiniteNumber(policyForm.deductible, 'Deductible'), out_of_pocket_max: parseFiniteNumber(policyForm.out_of_pocket_max, 'Out of pocket max'), effective_date: policyForm.effective_date, renewal_date: policyForm.renewal_date }
       if (editPolicyId) {
-        const { error } = await db.from('insurance_policies').update(payload).eq('id', editPolicyId)
+        const { error } = await db.from('insurance_policies').update(payload).eq('id', editPolicyId).eq('user_id', userId as string)
         if (error) throw new Error(error.message)
       } else {
         const { error } = await db.from('insurance_policies').insert(payload)
@@ -162,7 +180,7 @@ export default function HealthPage() {
   })
   const deletePolicyMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await db.from('insurance_policies').update({ is_deleted: true }).eq('id', id)
+      const { error } = await db.from('insurance_policies').update({ is_deleted: true }).eq('id', id).eq('user_id', userId as string)
       if (error) throw new Error(error.message)
     },
     onSuccess: async () => { toast.success('Policy deleted.'); await invalidate() },
@@ -172,7 +190,7 @@ export default function HealthPage() {
     mutationFn: async () => {
       const payload = { user_id: userId, provider_name: appointmentForm.provider_name.trim(), specialty: appointmentForm.specialty || null, appointment_type: appointmentForm.appointment_type, appointment_date: appointmentForm.appointment_date, location: appointmentForm.location || null, notes: appointmentForm.notes || null, household_member_id: appointmentForm.household_member_id || null, insurance_policy_id: appointmentForm.insurance_policy_id || null, status: appointmentForm.status }
       if (editAppointmentId) {
-        const { error } = await db.from('appointments').update(payload).eq('id', editAppointmentId)
+        const { error } = await db.from('appointments').update(payload).eq('id', editAppointmentId).eq('user_id', userId as string)
         if (error) throw new Error(error.message)
       } else {
         const { error } = await db.from('appointments').insert(payload)
@@ -184,7 +202,7 @@ export default function HealthPage() {
   })
   const cancelAppointmentMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await db.from('appointments').update({ status: 'cancelled' }).eq('id', id)
+      const { error } = await db.from('appointments').update({ status: 'cancelled' }).eq('id', id).eq('user_id', userId as string)
       if (error) throw new Error(error.message)
     },
     onSuccess: async () => { toast.success('Appointment cancelled.'); await invalidate() },
@@ -192,9 +210,9 @@ export default function HealthPage() {
   })
   const claimMutation = useMutation({
     mutationFn: async () => {
-      const payload = { user_id: userId, claim_number: claimForm.claim_number, policy_id: claimForm.policy_id, service_date: claimForm.service_date, provider_name: claimForm.provider_name, diagnosis_code: claimForm.diagnosis_code || null, billed_amount: Number(claimForm.billed_amount), allowed_amount: Number(claimForm.allowed_amount), insurance_paid: Number(claimForm.insurance_paid), patient_responsibility: Number(claimForm.patient_responsibility), status: claimForm.status, notes: claimForm.notes || null }
+      const payload = { user_id: userId, claim_number: claimForm.claim_number, policy_id: claimForm.policy_id, service_date: claimForm.service_date, provider_name: claimForm.provider_name, diagnosis_code: claimForm.diagnosis_code || null, billed_amount: parseFiniteNumber(claimForm.billed_amount, 'Billed amount'), allowed_amount: parseFiniteNumber(claimForm.allowed_amount, 'Allowed amount'), insurance_paid: parseFiniteNumber(claimForm.insurance_paid, 'Insurance paid'), patient_responsibility: parseFiniteNumber(claimForm.patient_responsibility, 'Patient responsibility'), status: claimForm.status, notes: claimForm.notes || null }
       if (editClaimId) {
-        const { error } = await db.from('insurance_claims').update(payload).eq('id', editClaimId)
+        const { error } = await db.from('insurance_claims').update(payload).eq('id', editClaimId).eq('user_id', userId as string)
         if (error) throw new Error(error.message)
       } else {
         const { error } = await db.from('insurance_claims').insert(payload)
@@ -206,7 +224,7 @@ export default function HealthPage() {
   })
   const deleteClaimMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await db.from('insurance_claims').update({ is_deleted: true }).eq('id', id)
+      const { error } = await db.from('insurance_claims').update({ is_deleted: true }).eq('id', id).eq('user_id', userId as string)
       if (error) throw new Error(error.message)
     },
     onSuccess: async () => { toast.success('Claim deleted.'); await invalidate() },
@@ -214,9 +232,9 @@ export default function HealthPage() {
   })
   const prescriptionMutation = useMutation({
     mutationFn: async () => {
-      const payload = { user_id: userId, household_member_id: prescriptionForm.household_member_id || null, medication_name: prescriptionForm.medication_name, dosage: prescriptionForm.dosage || null, frequency: prescriptionForm.frequency || null, prescriber_name: prescriptionForm.prescriber_name || null, pharmacy_name: prescriptionForm.pharmacy_name || null, refills_remaining: Number(prescriptionForm.refills_remaining), last_filled_date: prescriptionForm.last_filled_date || null, next_fill_date: prescriptionForm.next_fill_date || null, cost_per_fill: Number(prescriptionForm.cost_per_fill), notes: prescriptionForm.notes || null, is_active: true }
+      const payload = { user_id: userId, household_member_id: prescriptionForm.household_member_id || null, medication_name: prescriptionForm.medication_name, dosage: prescriptionForm.dosage || null, frequency: prescriptionForm.frequency || null, prescriber_name: prescriptionForm.prescriber_name || null, pharmacy_name: prescriptionForm.pharmacy_name || null, refills_remaining: parseFiniteNumber(prescriptionForm.refills_remaining, 'Refills remaining'), last_filled_date: prescriptionForm.last_filled_date || null, next_fill_date: prescriptionForm.next_fill_date || null, cost_per_fill: parseFiniteNumber(prescriptionForm.cost_per_fill, 'Cost per fill'), notes: prescriptionForm.notes || null, is_active: true }
       if (editPrescriptionId) {
-        const { error } = await db.from('prescriptions').update(payload).eq('id', editPrescriptionId)
+        const { error } = await db.from('prescriptions').update(payload).eq('id', editPrescriptionId).eq('user_id', userId as string)
         if (error) throw new Error(error.message)
       } else {
         const { error } = await db.from('prescriptions').insert(payload)
@@ -228,7 +246,7 @@ export default function HealthPage() {
   })
   const archivePrescriptionMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await db.from('prescriptions').update({ is_active: false }).eq('id', id)
+      const { error } = await db.from('prescriptions').update({ is_active: false }).eq('id', id).eq('user_id', userId as string)
       if (error) throw new Error(error.message)
     },
     onSuccess: async () => { toast.success('Prescription archived.'); await invalidate() },

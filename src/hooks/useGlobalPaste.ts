@@ -22,6 +22,7 @@ export interface PasteState {
 export function useGlobalPaste(onResult: (result: RecognitionResult, previewUrl: string) => void) {
   const { user } = useAuthStore()
   const previewUrlRef = useRef<string | null>(null)
+  const requestInFlightRef = useRef(false)
   const [state, setState] = useState<PasteState>({
     isProcessing: false,
     result: null,
@@ -31,6 +32,8 @@ export function useGlobalPaste(onResult: (result: RecognitionResult, previewUrl:
 
   const processImageFile = useCallback(async (file: File) => {
     if (!user) return
+    if (requestInFlightRef.current) return
+    requestInFlightRef.current = true
     if (previewUrlRef.current) {
       URL.revokeObjectURL(previewUrlRef.current)
       previewUrlRef.current = null
@@ -75,8 +78,10 @@ export function useGlobalPaste(onResult: (result: RecognitionResult, previewUrl:
         URL.revokeObjectURL(previewUrl)
         if (previewUrlRef.current === previewUrl) previewUrlRef.current = null
       }
-      const msg = err instanceof Error ? err.message : 'Recognition failed'
+      const msg = err instanceof Error ? err.message : 'AI request failed. Please try again in a moment.'
       setState({ isProcessing: false, result: null, error: msg, previewUrl: null })
+    } finally {
+      requestInFlightRef.current = false
     }
   }, [user, onResult])
 

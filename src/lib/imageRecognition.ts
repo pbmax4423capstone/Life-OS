@@ -15,6 +15,8 @@ export type RecognitionResult = {
   rawOutput: string
 }
 
+let recognitionRequestInFlight = false
+
 const SYSTEM_PROMPT = `You are a financial and personal document scanner embedded in a personal life management app.
 
 When given an image, you must:
@@ -66,56 +68,71 @@ export async function recognizeImage(
   base64Image: string,
   mediaType: string = 'image/jpeg'
 ): Promise<RecognitionResult> {
+  if (recognitionRequestInFlight) {
+    throw new Error('AI request failed. Please try again in a moment.')
+  }
+  recognitionRequestInFlight = true
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-  if (!supabaseUrl) throw new Error('Supabase URL not configured')
+  if (!supabaseUrl) {
+    recognitionRequestInFlight = false
+    throw new Error('AI request failed. Please try again in a moment.')
+  }
 
   const { data: { session } } = await supabase.auth.getSession()
-  if (!session) throw new Error('Not authenticated')
-
-  const response = await fetch(`${supabaseUrl}/functions/v1/anthropic-proxy`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({
-      requestType: 'image_recognition',
-      payload: {
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        system: SYSTEM_PROMPT,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: { type: 'base64', media_type: mediaType, data: base64Image },
-              },
-              { type: 'text', text: 'Scan this document and return the structured JSON.' },
-            ],
-          },
-        ],
-      },
-    }),
-  })
-
-  if (!response.ok) {
-    const err = await response.text()
-    throw new Error(`Claude API error: ${err}`)
+  if (!session) {
+    recognitionRequestInFlight = false
+    throw new Error('AI request failed. Please try again in a moment.')
   }
 
-  const data = await response.json()
-  const rawText = data.content?.[0]?.text ?? ''
-
-  let parsed: Record<string, unknown>
   try {
-    parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim())
-  } catch {
-    throw new Error('AI returned unparseable response')
-  }
+    const response = await fetch(`${supabaseUrl}/functions/v1/anthropic-proxy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        requestType: 'image_recognition',
+        payload: {
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1024,
+          system: SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image',
+                  source: { type: 'base64', media_type: mediaType, data: base64Image },
+                },
+                { type: 'text', text: 'Scan this document and return the structured JSON.' },
+              ],
+            },
+          ],
+        },
+      }),
+    })
 
-  return mapToResult(parsed, rawText)
+    if (!response.ok) {
+      throw new Error('AI request failed. Please try again in a moment.')
+    }
+
+    const data = await response.json()
+    const rawText = data.content?.[0]?.text ?? ''
+
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim())
+    } catch {
+      throw new Error('AI request failed. Please try again in a moment.')
+    }
+
+    return mapToResult(parsed, rawText)
+  } catch {
+    throw new Error('AI request failed. Please try again in a moment.')
+  } finally {
+    recognitionRequestInFlight = false
+  }
 }
 
 // ── Map AI output → UI result ─────────────────────────────────

@@ -90,7 +90,7 @@ export async function createConversation(
       context_type: contextType,
       context_snapshot: { summary: context },
     })
-    .select('*')
+    .select('id, title, context_type, message_count, last_message_at, pinned, created_at')
     .single()
 
   if (error) throw error
@@ -99,9 +99,13 @@ export async function createConversation(
 
 // ── Load conversations ────────────────────────────────────────
 export async function getConversations(): Promise<Conversation[]> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
   const { data, error } = await supabase
     .from('ai_conversations')
-    .select('*')
+    .select('id, title, context_type, message_count, last_message_at, pinned, created_at')
+    .eq('owner_id', user.id)
     .is('deleted_at', null)
     .order('pinned', { ascending: false })
     .order('last_message_at', { ascending: false })
@@ -112,10 +116,14 @@ export async function getConversations(): Promise<Conversation[]> {
 
 // ── Load messages for a conversation ─────────────────────────
 export async function getMessages(conversationId: string): Promise<ChatMessage[]> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
   const { data, error } = await supabase
     .from('ai_messages')
     .select('id, role, content, created_at, suggested_action')
     .eq('conversation_id', conversationId)
+    .eq('owner_id', user.id)
     .neq('role', 'system')
     .order('created_at')
   if (error) throw error
@@ -156,6 +164,9 @@ export async function generateTitle(
   conversationId: string,
   firstMessage: string
 ): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
   // Simple title: first 60 chars of the user's first message
   const title = firstMessage.length > 60
     ? firstMessage.slice(0, 57) + '…'
@@ -165,14 +176,19 @@ export async function generateTitle(
     .from('ai_conversations')
     .update({ title })
     .eq('id', conversationId)
+    .eq('owner_id', user.id)
 }
 
 // ── Delete conversation ───────────────────────────────────────
 export async function deleteConversation(id: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
   await supabase
     .from('ai_conversations')
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', id)
+    .eq('owner_id', user.id)
 }
 
 // ── Main chat function (streaming) ───────────────────────────
@@ -232,8 +248,7 @@ export async function sendMessage(opts: {
     })
 
     if (!response.ok) {
-      const err = await response.text()
-      opts.onError(`API error: ${err}`)
+      opts.onError('AI request failed. Please try again in a moment.')
       return
     }
 
@@ -294,8 +309,8 @@ export async function sendMessage(opts: {
     }
 
     opts.onDone(cleanText, action)
-  } catch (err) {
-    opts.onError(err instanceof Error ? err.message : 'Unknown error')
+  } catch {
+    opts.onError('AI request failed. Please try again in a moment.')
   }
 }
 

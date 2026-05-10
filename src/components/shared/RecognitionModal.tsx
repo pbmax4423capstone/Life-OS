@@ -39,23 +39,31 @@ const CONFIDENCE_STYLES = {
   low:    { color: 'text-red-400',     bg: 'bg-red-500/20 border-red-500/30',         label: 'Low confidence — please verify' },
 }
 
+function toFiniteNumber(value: unknown, fallback: number | null = null): number | null {
+  const parsed = Number.parseFloat(String(value ?? ''))
+  if (!Number.isFinite(parsed)) return fallback
+  return parsed
+}
+
 export function RecognitionModal({ result, previewUrl, onConfirm, onDismiss }: Props) {
   const { user } = useAuthStore()
   const [fields, setFields] = useState<Record<string, unknown>>(result.fields)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const conf = CONFIDENCE_STYLES[result.confidence]
 
   const handleSave = async () => {
     if (!user) return
     setSaving(true)
+    setError(null)
     try {
       await saveToTable(result.targetTable, fields, user.id)
       setSaved(true)
       setTimeout(onConfirm, 1000)
-    } catch (err) {
-      console.error('Save error:', err)
+    } catch {
+      setError('AI request failed. Please try again in a moment.')
     } finally {
       setSaving(false)
     }
@@ -68,7 +76,12 @@ export function RecognitionModal({ result, previewUrl, onConfirm, onDismiss }: P
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onDismiss} />
 
-      <div className="relative bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl animate-slide-up">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="recognition-modal-title"
+        className="relative bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl animate-slide-up"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-700">
           <div className="flex items-center gap-3">
@@ -76,15 +89,15 @@ export function RecognitionModal({ result, previewUrl, onConfirm, onDismiss }: P
               <Sparkles size={18} />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-slate-100">
-                {result.displayLabel} Detected
-              </h3>
+                <h3 id="recognition-modal-title" className="text-base font-semibold text-slate-100">
+                  {result.displayLabel} Detected
+                </h3>
               <span className={`text-xs ${conf.color}`}>{conf.label}</span>
             </div>
           </div>
-          <button onClick={onDismiss} className="text-slate-400 hover:text-slate-200 transition-colors">
-            <X size={20} />
-          </button>
+           <button onClick={onDismiss} className="text-slate-400 hover:text-slate-200 transition-colors" aria-label="Close recognition modal">
+             <X size={20} />
+           </button>
         </div>
 
         <div className="p-5 space-y-4">
@@ -124,6 +137,11 @@ export function RecognitionModal({ result, previewUrl, onConfirm, onDismiss }: P
           </div>
 
           {/* Actions */}
+          {error && (
+            <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
           <div className="flex gap-2 pt-1">
             <button
               onClick={handleSave}
@@ -160,10 +178,10 @@ async function saveToTable(
       account_type: f.type === 'bank_statement' ? (f.account_type ?? 'checking') : 'credit_card',
       institution_name: f.institution ?? 'Unknown',
       last_four: f.last_four ?? null,
-      current_balance: Number(f.balance ?? 0),
-      credit_limit: f.credit_limit ? Number(f.credit_limit) : null,
-      interest_rate: f.apr ? Number(f.apr) / 100 : null,
-      rewards_balance: Number(f.rewards_points ?? 0),
+      current_balance: toFiniteNumber(f.balance, 0) ?? 0,
+      credit_limit: toFiniteNumber(f.credit_limit, null),
+      interest_rate: toFiniteNumber(f.apr, null) !== null ? (toFiniteNumber(f.apr, 0) ?? 0) / 100 : null,
+      rewards_balance: toFiniteNumber(f.rewards_points, 0) ?? 0,
     }),
     insurance_policies: () => supabase.from('insurance_policies').insert({
       owner_id: ownerId,
@@ -172,8 +190,8 @@ async function saveToTable(
       policy_number: f.policy_number ?? null,
       group_number: f.group_number ?? null,
       member_id: f.member_id ?? null,
-      copay_primary: f.copay_primary ? Number(f.copay_primary) : null,
-      copay_specialist: f.copay_specialist ? Number(f.copay_specialist) : null,
+      copay_primary: toFiniteNumber(f.copay_primary, null),
+      copay_specialist: toFiniteNumber(f.copay_specialist, null),
       effective_date: f.effective_date ?? null,
     }),
     flights: () => supabase.from('flights').insert({
@@ -195,7 +213,7 @@ async function saveToTable(
       program_type: 'airline',
       airline_code: f.airline_code ?? null,
       member_number: f.member_number ?? null,
-      miles_balance: Number(f.miles_balance ?? 0),
+      miles_balance: toFiniteNumber(f.miles_balance, 0) ?? 0,
     }),
     prescriptions: () => supabase.from('prescriptions').insert({
       owner_id: ownerId,
@@ -203,7 +221,7 @@ async function saveToTable(
       dosage: f.dosage ?? null,
       frequency: f.frequency ?? null,
       pharmacy_name: f.pharmacy_name ?? null,
-      refills_remaining: f.refills_remaining ? Number(f.refills_remaining) : null,
+      refills_remaining: toFiniteNumber(f.refills_remaining, null),
       next_refill_date: f.next_refill_date ?? null,
     }),
     job_applications: () => supabase.from('job_applications').insert({
@@ -211,8 +229,8 @@ async function saveToTable(
       company_name: f.company_name ?? 'Unknown',
       job_title: f.job_title ?? 'Unknown',
       status: 'offer',
-      salary_min: f.salary ? Number(f.salary) : null,
-      salary_max: f.salary ? Number(f.salary) : null,
+      salary_min: toFiniteNumber(f.salary, null),
+      salary_max: toFiniteNumber(f.salary, null),
       location: f.location ?? null,
       remote_type: f.remote_type ?? null,
       applied_date: new Date().toISOString().split('T')[0],

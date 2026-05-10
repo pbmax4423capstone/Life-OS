@@ -268,7 +268,7 @@ export function AiChat({ initialContext = 'general', embedded = false, onClose, 
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 flex-shrink-0">
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowSidebar(v => !v)} className="btn-ghost p-1.5">
+            <button onClick={() => setShowSidebar(v => !v)} className="btn-ghost p-1.5" aria-label={showSidebar ? 'Collapse conversation sidebar' : 'Expand conversation sidebar'}>
               {showSidebar ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             </button>
             <div className="p-1.5 rounded-lg bg-brand-500/20 text-brand-400">
@@ -286,7 +286,7 @@ export function AiChat({ initialContext = 'general', embedded = false, onClose, 
             </div>
           </div>
           {onClose && (
-            <button onClick={onClose} className="btn-ghost p-1.5"><X size={15} /></button>
+            <button onClick={onClose} className="btn-ghost p-1.5" aria-label="Close AI chat"><X size={15} /></button>
           )}
         </div>
 
@@ -383,6 +383,7 @@ export function FloatingChat() {
       {/* Floating button */}
       <button
         onClick={() => setOpen(v => !v)}
+        aria-label={open ? 'Close AI Assistant' : 'Open AI Assistant'}
         className={`fixed bottom-6 right-6 z-40 w-13 h-13 rounded-2xl shadow-2xl shadow-brand-900/50 flex items-center justify-center transition-all duration-200 ${open ? 'bg-slate-700 rotate-12' : 'bg-brand-600 hover:bg-brand-500'}`}
         style={{ width: 52, height: 52 }}
         title="AI Assistant"

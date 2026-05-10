@@ -2,7 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AppRouter from './router'
-import { useAuthStore } from './stores/authStore'
+import { useSessionGuard } from './hooks/useSessionGuard'
 import './index.css'
 
 const queryClient = new QueryClient({
@@ -15,8 +15,7 @@ const queryClient = new QueryClient({
 })
 
 function Root() {
-  const initialize = useAuthStore(s => s.initialize)
-  React.useEffect(() => { initialize() }, [initialize])
+  useSessionGuard()
   return (
     <QueryClientProvider client={queryClient}>
       <AppRouter />

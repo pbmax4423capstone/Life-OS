@@ -33,11 +33,19 @@ export interface SyncState {
   emails_processed: number
 }
 
+async function getOwnerId(): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+  return user.id
+}
+
 // ── Fetch today's + recent deliveries ─────────────────────────
 export async function getRecentDeliveries(limit = 7): Promise<MailDelivery[]> {
+  const ownerId = await getOwnerId()
   const { data, error } = await supabase
     .from('mail_deliveries')
-    .select('*')
+    .select('id, owner_id, delivery_date, email_subject, piece_count, reviewed, reviewed_at, notification_id, created_at')
+    .eq('owner_id', ownerId)
     .order('delivery_date', { ascending: false })
     .limit(limit)
   if (error) throw error
@@ -46,9 +54,11 @@ export async function getRecentDeliveries(limit = 7): Promise<MailDelivery[]> {
 
 // ── Fetch pieces for a delivery ───────────────────────────────
 export async function getMailPieces(deliveryId: string): Promise<MailPiece[]> {
+  const ownerId = await getOwnerId()
   const { data, error } = await supabase
     .from('mail_pieces')
-    .select('*')
+    .select('id, delivery_id, image_storage_path, image_url_original, sender_name, mail_type, flagged, flag_note, flag_color, reviewed_at, sort_order')
+    .eq('owner_id', ownerId)
     .eq('delivery_id', deliveryId)
     .order('sort_order')
   if (error) throw error
@@ -70,6 +80,7 @@ export async function toggleFlag(
   note?: string,
   color?: string
 ): Promise<void> {
+  const ownerId = await getOwnerId()
   const { error } = await supabase
     .from('mail_pieces')
     .update({
@@ -78,15 +89,18 @@ export async function toggleFlag(
       flag_color: color ?? 'red',
     })
     .eq('id', pieceId)
+    .eq('owner_id', ownerId)
   if (error) throw error
 }
 
 // ── Mark delivery as reviewed ─────────────────────────────────
 export async function markDeliveryReviewed(deliveryId: string): Promise<void> {
+  const ownerId = await getOwnerId()
   const { error } = await supabase
     .from('mail_deliveries')
     .update({ reviewed: true, reviewed_at: new Date().toISOString() })
     .eq('id', deliveryId)
+    .eq('owner_id', ownerId)
   if (error) throw error
 
   // Mark all pieces as reviewed
@@ -94,14 +108,17 @@ export async function markDeliveryReviewed(deliveryId: string): Promise<void> {
     .from('mail_pieces')
     .update({ reviewed_at: new Date().toISOString() })
     .eq('delivery_id', deliveryId)
+    .eq('owner_id', ownerId)
     .is('reviewed_at', null)
 }
 
 // ── Get Gmail sync state ──────────────────────────────────────
 export async function getSyncState(): Promise<SyncState | null> {
+  const ownerId = await getOwnerId()
   const { data } = await supabase
     .from('gmail_sync_state')
     .select('last_synced_at, sync_status, error_message, emails_processed')
+    .eq('owner_id', ownerId)
     .maybeSingle()
   return data
 }
@@ -134,9 +151,11 @@ export async function triggerMailSync(): Promise<{
 
 // ── Unreviewed count ──────────────────────────────────────────
 export async function getUnreviewedCount(): Promise<number> {
+  const ownerId = await getOwnerId()
   const { count } = await supabase
     .from('mail_deliveries')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
+    .eq('owner_id', ownerId)
     .eq('reviewed', false)
   return count ?? 0
 }

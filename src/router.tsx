@@ -22,12 +22,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       <div className="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full" />
     </div>
   )
-  if (!session) return <Navigate to="/auth" replace />
+  if (!session) return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
 const router = createBrowserRouter([
   { path: '/welcome', element: <LandingPage /> },
+  { path: '/login',   element: <AuthPage /> },
   { path: '/auth',    element: <AuthPage /> },
   { path: '/join',    element: <AuthPage /> },
   { path: '/privacy', element: <PrivacyPage /> },

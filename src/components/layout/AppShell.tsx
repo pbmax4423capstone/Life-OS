@@ -121,7 +121,7 @@ export default function AppShell() {
                 <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-sm">L</div>
                 <span className="font-semibold text-slate-100 text-sm">Life OS</span>
               </div>
-              <button onClick={() => setMobileOpen(false)} className="text-slate-400"><X size={18} /></button>
+              <button onClick={() => setMobileOpen(false)} className="text-slate-400" aria-label="Close mobile menu"><X size={18} /></button>
             </div>
             <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
               {NAV.map(({ to, label, icon: Icon }) => (
@@ -145,7 +145,7 @@ export default function AppShell() {
       <div className="flex-1 flex flex-col md:ml-56">
         {/* Top bar */}
         <header className="sticky top-0 z-10 bg-slate-900/60 border-b border-slate-800 backdrop-blur-sm px-4 md:px-6 py-3 flex items-center justify-between">
-          <button onClick={() => setMobileOpen(true)} className="md:hidden text-slate-400 hover:text-slate-200 p-1">
+          <button onClick={() => setMobileOpen(true)} className="md:hidden text-slate-400 hover:text-slate-200 p-1" aria-label="Open mobile menu">
             <Menu size={20} />
           </button>
           {/* Drop zone for drag-and-drop on mobile */}
@@ -168,7 +168,7 @@ export default function AppShell() {
             }}
           />
           <div className="flex items-center gap-2">
-            <button className="text-slate-400 hover:text-slate-200 p-2 rounded-lg hover:bg-slate-800 transition-colors">
+            <button className="text-slate-400 hover:text-slate-200 p-2 rounded-lg hover:bg-slate-800 transition-colors" aria-label="Notifications">
               <Bell size={18} />
             </button>
           </div>

@@ -2,9 +2,7 @@ import { create } from 'zustand'
 import { supabase, type Profile } from '@/lib/supabase'
 import type { Session, User } from '@supabase/supabase-js'
 
-let authListener: { unsubscribe: () => void } | null = null
 let initializePromise: Promise<void> | null = null
-let initialized = false
 
 interface AuthState {
   session: Session | null
@@ -21,16 +19,17 @@ interface AuthState {
   ) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   setProfile: (profile: Profile) => void
+  setSessionState: (session: Session | null) => void
+  clearSessionState: () => void
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   session: null,
   user: null,
   profile: null,
   loading: true,
 
   initialize: async () => {
-    if (initialized) return
     if (initializePromise) return initializePromise
 
     initializePromise = (async () => {
@@ -47,23 +46,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       } else {
         set({ loading: false })
       }
-
-      authListener?.unsubscribe()
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-        set({ session, user: session?.user ?? null })
-        if (session?.user) {
-          const { data } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single()
-          set({ profile: data })
-        } else {
-          set({ profile: null })
-        }
-      })
-      authListener = subscription
-      initialized = true
     })()
 
     try {
@@ -98,4 +80,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   setProfile: (profile) => set({ profile }),
+  setSessionState: (session) => set((state) => ({
+    session,
+    user: session?.user ?? null,
+    loading: false,
+    profile: session ? state.profile : null,
+  })),
+  clearSessionState: () => set({
+    session: null,
+    user: null,
+    profile: null,
+    loading: false,
+  }),
 }))
