@@ -7,9 +7,12 @@ import LandingPage from '@/pages/LandingPage'
 import ChatPage from '@/pages/ChatPage'
 import DebtPlannerPage from '@/pages/finance/DebtPlannerPage'
 import RetirementLoanPage from '@/pages/finance/RetirementLoanPage'
+import HealthPage from '@/pages/HealthPage'
+import JobsPage from '@/pages/JobsPage'
+import TravelPage from '@/pages/TravelPage'
 import {
   AccountsPage, PaymentsPage, AnalyticsPage,
-  RewardsPage, TravelPage, HealthPage, JobsPage, SettingsPage, PrivacyPage, TermsPage
+  RewardsPage, SettingsPage, PrivacyPage, TermsPage
 } from '@/pages/StubPages'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
