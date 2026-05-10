@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 
 export interface ToastMessage {
@@ -33,16 +33,17 @@ export function useToastQueue() {
     setToasts((prev) => [...prev, { id, type, message }])
   }
 
-  const dismiss = (id: string) => {
+  const dismiss = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id))
-  }
+  }, [])
+
+  const latestToastId = toasts[toasts.length - 1]?.id
 
   useEffect(() => {
-    if (toasts.length === 0) return
-    const latest = toasts[toasts.length - 1]
-    const timeout = window.setTimeout(() => dismiss(latest.id), 3500)
+    if (!latestToastId) return
+    const timeout = window.setTimeout(() => dismiss(latestToastId), 3500)
     return () => window.clearTimeout(timeout)
-  }, [toasts])
+  }, [latestToastId, dismiss])
 
   return {
     toasts,

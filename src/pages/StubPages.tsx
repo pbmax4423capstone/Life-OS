@@ -221,6 +221,12 @@ const normalizeRate = (rate: number | null): number => {
   return rate <= 1 ? rate * 100 : rate
 }
 
+const formatEnumLabel = (value: string): string => {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
 function AccountForm({
   form,
   setForm,
@@ -245,7 +251,7 @@ function AccountForm({
             onChange={(event) => setForm((current) => ({ ...current, account_type: event.target.value as AccountType }))}
           >
             {ACCOUNT_TYPE_OPTIONS.map((type) => (
-              <option key={type} value={type}>{type.replace('_', ' ')}</option>
+              <option key={type} value={type}>{formatEnumLabel(type)}</option>
             ))}
           </select>
         </label>
@@ -563,7 +569,7 @@ export function AccountsPage() {
                             <div className="min-w-0">
                               <p className="font-semibold text-slate-100 truncate">{account.nickname || account.institution_name}</p>
                               <p className="text-xs text-slate-500 truncate">{account.institution_name}</p>
-                              <p className="text-xs text-slate-400 mt-1">Type: {account.account_type.replace('_', ' ')}</p>
+                              <p className="text-xs text-slate-400 mt-1">Type: {formatEnumLabel(account.account_type)}</p>
                             </div>
                           </div>
 
@@ -731,7 +737,7 @@ function PaymentForm({
             onChange={(event) => setForm((current) => ({ ...current, frequency: event.target.value as PaymentFrequency }))}
           >
             {FREQUENCY_OPTIONS.map((frequency) => (
-              <option key={frequency} value={frequency}>{frequency.replace('_', ' ')}</option>
+              <option key={frequency} value={frequency}>{formatEnumLabel(frequency)}</option>
             ))}
           </select>
         </label>
@@ -992,7 +998,7 @@ export function PaymentsPage() {
                 <div>
                   <p className="text-slate-100 font-semibold">{payment.payee_name || 'Payment'}</p>
                   <p className="text-xs text-slate-400 mt-1">
-                    {payment.frequency.replace('_', ' ')} · Source: {accountNameById.get(payment.from_account_id) ?? 'Unknown account'}
+                    {formatEnumLabel(payment.frequency)} · Source: {accountNameById.get(payment.from_account_id) ?? 'Unknown account'}
                   </p>
                   <p className="text-xs text-slate-500 mt-1">Due: {formatDateLabel(payment.next_due_date)}</p>
                   <p className="text-xs mt-1 uppercase tracking-wide text-slate-400">Status: {payment.status}</p>
