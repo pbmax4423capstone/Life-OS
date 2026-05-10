@@ -43,6 +43,9 @@ const STATUS_CLASS: Record<string, string> = {
 }
 
 function parseFiniteNumber(value: string, fieldName: string): number {
+  if (!value.trim()) {
+    throw new Error(`${fieldName} is required.`)
+  }
   const parsed = Number.parseFloat(value)
   if (!Number.isFinite(parsed)) {
     throw new Error(`${fieldName} must be a valid number.`)
