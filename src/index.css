@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+
+  html { font-family: 'DM Sans', system-ui, sans-serif; }
+
+  body {
+    @apply bg-slate-950 text-slate-200 antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-slate-700 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-slate-600; }
+
+  ::selection { @apply bg-brand-500/30 text-white; }
+}
+
+@layer components {
+  .card {
+    @apply bg-slate-800/60 border border-slate-700/50 rounded-2xl backdrop-blur-sm;
+  }
+
+  .input-base {
+    @apply bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200
+           placeholder-slate-500 focus:outline-none focus:border-brand-500
+           transition-colors w-full;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-500
+           text-white text-sm font-medium rounded-lg transition-all cursor-pointer;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-slate-200
+           hover:bg-slate-700/50 text-sm font-medium rounded-lg transition-all cursor-pointer;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center gap-2 px-3 py-2 bg-red-600/20 hover:bg-red-600/40
+           text-red-400 border border-red-600/30 text-sm font-medium rounded-lg
+           transition-all cursor-pointer;
+  }
+
+  .nav-item {
+    @apply w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium
+           transition-all text-left text-slate-400 hover:text-slate-200 hover:bg-slate-800/50;
+  }
+
+  .nav-item-active {
+    @apply bg-brand-600/20 text-brand-300 border border-brand-500/30;
+  }
+
+  .badge {
+    @apply text-xs px-2 py-0.5 rounded-full border font-medium;
+  }
+
+  /* Image paste drop zone */
+  .paste-zone {
+    @apply border-2 border-dashed border-slate-600 rounded-xl p-6 text-center
+           transition-all cursor-pointer hover:border-brand-500 hover:bg-brand-500/5;
+  }
+
+  .paste-zone-active {
+    @apply border-brand-500 bg-brand-500/10;
+  }
+}
+
+/* Glow effects for stat cards */
+.glow-green  { box-shadow: 0 0 20px -5px rgba(16, 185, 129, 0.15); }
+.glow-red    { box-shadow: 0 0 20px -5px rgba(239, 68, 68, 0.15); }
+.glow-indigo { box-shadow: 0 0 20px -5px rgba(99, 102, 241, 0.15); }
+.glow-amber  { box-shadow: 0 0 20px -5px rgba(245, 158, 11, 0.15); }
