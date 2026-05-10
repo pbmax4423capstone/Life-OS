@@ -293,15 +293,22 @@ export function generateLoanSchedule(
   startDate: Date,
   frequency: 'monthly' | 'biweekly' = 'monthly'
 ): LoanPayment[] {
-  const isbiweekly = frequency === 'biweekly'
+  if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(termMonths) || termMonths <= 0) {
+    return []
+  }
+
+  const isBiweekly = frequency === 'biweekly'
   // For biweekly: use 26 periods/year
-  const periodsPerYear = isbiweekly ? 26 : 12
+  const periodsPerYear = isBiweekly ? 26 : 12
   const periodRate = annualRate / periodsPerYear
-  const totalPayments = isbiweekly ? Math.round(termMonths * 26 / 12) : termMonths
+  const totalPayments = isBiweekly ? Math.round(termMonths * 26 / 12) : termMonths
+  if (totalPayments <= 0) return []
 
   // Fixed payment using annuity formula
-  const payment = principal * (periodRate * Math.pow(1 + periodRate, totalPayments))
-    / (Math.pow(1 + periodRate, totalPayments) - 1)
+  const payment = periodRate === 0
+    ? principal / totalPayments
+    : principal * (periodRate * Math.pow(1 + periodRate, totalPayments))
+      / (Math.pow(1 + periodRate, totalPayments) - 1)
 
   const schedule: LoanPayment[] = []
   let balance = principal
@@ -322,7 +329,7 @@ export function generateLoanSchedule(
     })
 
     // Advance date
-    if (isbiweekly) {
+    if (isBiweekly) {
       current.setDate(current.getDate() + 14)
     } else {
       current.setMonth(current.getMonth() + 1)

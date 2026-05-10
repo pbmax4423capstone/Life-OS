@@ -1,10 +1,12 @@
-import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
+import { redeemInviteCode } from '@/lib/inviteService'
 
 export default function AuthPage() {
   const { session, signIn, signUp } = useAuthStore()
+  const [searchParams] = useSearchParams()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -12,17 +14,58 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+  const [invitePlan, setInvitePlan] = useState<string | null>(null)
+  const [validatingInvite, setValidatingInvite] = useState(false)
+
+  const inviteCode = useMemo(
+    () => searchParams.get('code')?.trim().toUpperCase() ?? '',
+    [searchParams]
+  )
 
   if (session) return <Navigate to="/" replace />
 
+  useEffect(() => {
+    if (!inviteCode) {
+      setInviteError(null)
+      setInvitePlan(null)
+      return
+    }
+
+    setMode('signup')
+    setValidatingInvite(true)
+    redeemInviteCode(inviteCode)
+      .then((res) => {
+        if (res.valid) {
+          setInvitePlan(res.planGrant ?? null)
+          setInviteError(null)
+        } else {
+          setInvitePlan(null)
+          setInviteError(res.error ?? 'Invalid invite code')
+        }
+      })
+      .catch(() => setInviteError('Unable to validate invite code'))
+      .finally(() => setValidatingInvite(false))
+  }, [inviteCode])
+
   const handleSubmit = async () => {
     setError(null)
+    setSuccess(null)
     setLoading(true)
     if (mode === 'signin') {
       const { error } = await signIn(email, password)
       if (error) setError(error)
     } else {
-      const { error } = await signUp(email, password, name)
+      if (inviteCode && (validatingInvite || inviteError)) {
+        setError(inviteError ?? 'Invite code validation failed')
+        setLoading(false)
+        return
+      }
+
+      const { error } = await signUp(email, password, name, {
+        code: inviteCode || undefined,
+        planGrant: invitePlan ?? undefined,
+      })
       if (error) setError(error)
       else setSuccess('Check your email to confirm your account.')
     }
@@ -49,6 +92,20 @@ export default function AuthPage() {
 
         {/* Card */}
         <div className="card p-6 space-y-4">
+          {inviteCode && (
+            <div className={`text-xs rounded-lg px-3 py-2 border ${
+              inviteError
+                ? 'text-red-400 bg-red-500/10 border-red-500/20'
+                : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+            }`}>
+              {validatingInvite
+                ? `Validating invite code ${inviteCode}…`
+                : inviteError
+                  ? inviteError
+                  : `Invite code ${inviteCode} accepted${invitePlan ? ` · plan: ${invitePlan}` : ''}`}
+            </div>
+          )}
+
           {/* Tabs */}
           <div className="flex bg-slate-900 rounded-lg p-1">
             {(['signin', 'signup'] as const).map(m => (

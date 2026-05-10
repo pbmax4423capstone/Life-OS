@@ -15,6 +15,7 @@ interface RetirementLoan {
   current_balance: number
   interest_rate: number
   origination_date: string
+  first_payment_date: string
   payoff_date: string
   payment_amount: number
   payment_frequency: string
@@ -55,6 +56,7 @@ function AddLoanModal({ onSave, onClose, accounts }: {
     payment_amount: '',
   })
   const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
   // Auto-calc payment amount when amount + term change
   useEffect(() => {
@@ -63,8 +65,10 @@ function AddLoanModal({ onSave, onClose, accounts }: {
     const n = parseInt(form.loan_term_months)
     const periods = form.payment_frequency === 'biweekly' ? Math.round(n * 26 / 12) : n
     const periodRate = rate / (form.payment_frequency === 'biweekly' ? 26 : 12)
-    if (principal > 0 && periodRate > 0 && periods > 0) {
-      const pmt = principal * (periodRate * Math.pow(1 + periodRate, periods)) / (Math.pow(1 + periodRate, periods) - 1)
+    if (principal > 0 && periods > 0) {
+      const pmt = periodRate > 0
+        ? principal * (periodRate * Math.pow(1 + periodRate, periods)) / (Math.pow(1 + periodRate, periods) - 1)
+        : principal / periods
       setForm(f => ({ ...f, payment_amount: pmt.toFixed(2) }))
     }
   }, [form.original_amount, form.interest_rate, form.loan_term_months, form.payment_frequency])
@@ -82,20 +86,54 @@ function AddLoanModal({ onSave, onClose, accounts }: {
 
   const handleSave = async () => {
     if (!user) return
+    setFormError(null)
+
+    const originalAmount = parseFloat(form.original_amount)
+    const currentBalance = parseFloat(form.current_balance || form.original_amount)
+    const rate = parseFloat(form.interest_rate) / 100
+    const loanTermMonths = parseInt(form.loan_term_months)
+    const paymentAmount = parseFloat(form.payment_amount)
+    const firstPaymentDate = form.first_payment_date ? new Date(form.first_payment_date) : null
+
+    if (!form.first_payment_date || !firstPaymentDate || Number.isNaN(firstPaymentDate.getTime())) {
+      setFormError('First payment date is required.')
+      return
+    }
+    if (!Number.isFinite(originalAmount) || originalAmount <= 0) {
+      setFormError('Original amount must be greater than 0.')
+      return
+    }
+    if (!Number.isFinite(currentBalance) || currentBalance <= 0) {
+      setFormError('Current balance must be greater than 0.')
+      return
+    }
+    if (!Number.isFinite(loanTermMonths) || loanTermMonths <= 0) {
+      setFormError('Loan term must be greater than 0 months.')
+      return
+    }
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+      setFormError('Payment amount must be greater than 0.')
+      return
+    }
+    if (!Number.isFinite(rate) || rate < 0) {
+      setFormError('Interest rate must be 0 or greater.')
+      return
+    }
+
     setSaving(true)
     await onSave({
       owner_id: user.id,
       plan_name: form.plan_name,
       account_id: form.account_id,
-      original_amount: parseFloat(form.original_amount),
-      current_balance: parseFloat(form.current_balance || form.original_amount),
-      interest_rate: parseFloat(form.interest_rate) / 100,
+      original_amount: originalAmount,
+      current_balance: currentBalance,
+      interest_rate: rate,
       origination_date: form.origination_date,
       first_payment_date: form.first_payment_date,
       payoff_date: form.payoff_date,
-      loan_term_months: parseInt(form.loan_term_months),
+      loan_term_months: loanTermMonths,
       payment_frequency: form.payment_frequency as 'biweekly' | 'monthly',
-      payment_amount: parseFloat(form.payment_amount),
+      payment_amount: paymentAmount,
     })
     setSaving(false)
     onClose()
@@ -124,10 +162,16 @@ function AddLoanModal({ onSave, onClose, accounts }: {
               <div key={key} className="flex flex-col gap-1">
                 <label className="text-xs text-slate-400">{label}</label>
                 <input type={type} value={form[key as keyof typeof form]} onChange={e => f(key as keyof typeof form, e.target.value)}
-                  placeholder={placeholder} className="input-base text-sm" />
+                  placeholder={placeholder} className="input-base text-sm" required={key === 'first_payment_date'} />
               </div>
             ))}
           </div>
+
+          {formError && (
+            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+              {formError}
+            </p>
+          )}
 
           <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-400">Payment Frequency</label>
@@ -147,7 +191,11 @@ function AddLoanModal({ onSave, onClose, accounts }: {
           )}
 
           <div className="flex gap-2 pt-2">
-            <button onClick={handleSave} disabled={saving || !form.original_amount} className="btn-primary flex-1 justify-center">
+            <button
+              onClick={handleSave}
+              disabled={saving || !form.original_amount || !form.first_payment_date}
+              className="btn-primary flex-1 justify-center"
+            >
               {saving ? <Loader2 size={14} className="animate-spin" /> : 'Save Loan'}
             </button>
             <button onClick={onClose} className="btn-ghost">Cancel</button>
@@ -231,11 +279,16 @@ export default function RetirementLoanPage() {
   const loan = selectedLoan
   const schedule = useMemo(() => {
     if (!loan) return []
+    const startDate = loan.first_payment_date
+      ? new Date(loan.first_payment_date)
+      : new Date(loan.origination_date || Date.now())
+    if (Number.isNaN(startDate.getTime())) return []
+
     return generateLoanSchedule(
       loan.current_balance,
       loan.interest_rate,
       loan.loan_term_months ?? 60,
-      new Date(loan.payoff_date ? new Date(loan.payoff_date).setFullYear(new Date().getFullYear()) : Date.now()),
+      startDate,
       loan.payment_frequency as 'monthly' | 'biweekly'
     )
   }, [loan])

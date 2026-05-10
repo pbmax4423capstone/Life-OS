@@ -64,32 +64,37 @@ export async function recognizeImage(
   base64Image: string,
   mediaType: string = 'image/jpeg'
 ): Promise<RecognitionResult> {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error('Anthropic API key not configured')
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  if (!supabaseUrl) throw new Error('Supabase URL not configured')
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new Error('Not authenticated')
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/anthropic-proxy`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      Authorization: `Bearer ${session.access_token}`,
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mediaType, data: base64Image },
-            },
-            { type: 'text', text: 'Scan this document and return the structured JSON.' },
-          ],
-        },
-      ],
+      requestType: 'image_recognition',
+      payload: {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: mediaType, data: base64Image },
+              },
+              { type: 'text', text: 'Scan this document and return the structured JSON.' },
+            ],
+          },
+        ],
+      },
     }),
   })
 
@@ -151,3 +156,4 @@ function mapToResult(
     rawOutput,
   }
 }
+import { supabase } from '@/lib/supabase'

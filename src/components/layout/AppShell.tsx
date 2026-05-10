@@ -39,7 +39,7 @@ export default function AppShell() {
     setRecognition({ result, previewUrl })
   }, [])
 
-  const { isProcessing, error, processImageFile } = useGlobalPaste(handleResult)
+  const { isProcessing, error, processImageFile, clearPreview } = useGlobalPaste(handleResult)
 
   const handleSignOut = async () => {
     await signOut()
@@ -187,8 +187,14 @@ export default function AppShell() {
         <RecognitionModal
           result={recognition.result}
           previewUrl={recognition.previewUrl}
-          onConfirm={() => setRecognition(null)}
-          onDismiss={() => setRecognition(null)}
+          onConfirm={() => {
+            clearPreview()
+            setRecognition(null)
+          }}
+          onDismiss={() => {
+            clearPreview()
+            setRecognition(null)
+          }}
         />
       )}
 

@@ -185,9 +185,15 @@ export async function sendMessage(opts: {
   onDone: (fullText: string, action: unknown) => void
   onError: (err: string) => void
 }): Promise<void> {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
-  if (!apiKey) {
-    opts.onError('Anthropic API key not configured')
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  if (!supabaseUrl) {
+    opts.onError('Supabase URL not configured')
+    return
+  }
+
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) {
+    opts.onError('Not authenticated')
     return
   }
 
@@ -206,20 +212,22 @@ export async function sendMessage(opts: {
     : SYSTEM_PROMPT
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch(`${supabaseUrl}/functions/v1/anthropic-proxy`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'interleaved-thinking-2025-05-14',
+        Authorization: `Bearer ${session.access_token}`,
+        Accept: 'text/event-stream',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        stream: true,
-        system: systemWithContext,
-        messages: history,
+        requestType: 'chat_stream',
+        payload: {
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1024,
+          stream: true,
+          system: systemWithContext,
+          messages: history,
+        },
       }),
     })
 
@@ -234,16 +242,21 @@ export async function sendMessage(opts: {
 
     const decoder = new TextDecoder()
     let fullText = ''
+    let buffer = ''
 
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
 
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split('\n').filter(l => l.startsWith('data: '))
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
 
       for (const line of lines) {
-        const jsonStr = line.slice(6)
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data:')) continue
+
+        const jsonStr = trimmed.slice(5).trim()
         if (jsonStr === '[DONE]') continue
         try {
           const event = JSON.parse(jsonStr)
@@ -252,6 +265,19 @@ export async function sendMessage(opts: {
             opts.onChunk(event.delta.text)
           }
         } catch { /* skip malformed lines */ }
+      }
+    }
+
+    if (buffer.trim().startsWith('data:')) {
+      const jsonStr = buffer.trim().slice(5).trim()
+      if (jsonStr && jsonStr !== '[DONE]') {
+        try {
+          const event = JSON.parse(jsonStr)
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            fullText += event.delta.text
+            opts.onChunk(event.delta.text)
+          }
+        } catch { /* skip malformed trailing line */ }
       }
     }
 

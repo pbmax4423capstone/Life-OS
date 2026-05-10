@@ -9,7 +9,7 @@ import DebtPlannerPage from '@/pages/finance/DebtPlannerPage'
 import RetirementLoanPage from '@/pages/finance/RetirementLoanPage'
 import {
   AccountsPage, PaymentsPage, AnalyticsPage,
-  RewardsPage, TravelPage, HealthPage, JobsPage, SettingsPage
+  RewardsPage, TravelPage, HealthPage, JobsPage, SettingsPage, PrivacyPage, TermsPage
 } from '@/pages/StubPages'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -27,6 +27,8 @@ const router = createBrowserRouter([
   { path: '/welcome', element: <LandingPage /> },
   { path: '/auth',    element: <AuthPage /> },
   { path: '/join',    element: <AuthPage /> },
+  { path: '/privacy', element: <PrivacyPage /> },
+  { path: '/terms',   element: <TermsPage /> },
   {
     path: '/',
     element: <ProtectedRoute><AppShell /></ProtectedRoute>,

@@ -151,10 +151,12 @@ export default function DebtPlannerPage() {
 
   const avalanche = useMemo(() => calcAvalanche(debtAccounts, extra), [debtAccounts, extra])
   const snowball = useMemo(() => calcSnowball(debtAccounts, extra), [debtAccounts, extra])
+  const avalancheNoExtra = useMemo(() => calcAvalanche(debtAccounts, 0), [debtAccounts])
   const active = strategy === 'avalanche' ? avalanche : strategy === 'snowball' ? snowball : avalanche
 
   const interestSaved = Math.max(0, snowball.totalInterest - avalanche.totalInterest)
   const monthsSaved = Math.max(0, snowball.totalMonths - avalanche.totalMonths)
+  const extraVsNoExtraSaved = Math.max(0, avalancheNoExtra.totalInterest - avalanche.totalInterest)
 
   const handleAiAnalyze = () => {
     const ctx = buildDebtContext(debtAccounts, avalanche, snowball, extra)
@@ -241,7 +243,7 @@ export default function DebtPlannerPage() {
         </div>
         {extra > 0 && (
           <div className="mt-3 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
-            With ${extra}/mo extra: pay off {monthsSaved > 0 ? `${avalanche.totalMonths} months` : `by ${avalanche.payoffDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`} and save {fmt(snowball.totalInterest - (calcAvalanche(debtAccounts, extra).totalInterest))} vs. no extra payment
+            With ${extra}/mo extra: pay off {monthsSaved > 0 ? `${avalanche.totalMonths} months` : `by ${avalanche.payoffDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`} and save {fmt(extraVsNoExtraSaved)} vs. no extra payment
           </div>
         )}
       </div>

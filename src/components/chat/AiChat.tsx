@@ -119,14 +119,18 @@ export function AiChat({ initialContext = 'general', embedded = false, onClose, 
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const startNewConversation = useCallback(async () => {
+  const startNewConversation = useCallback(async (): Promise<Conversation> => {
     setLoading(true)
-    const conv = await createConversation(initialContext)
-    setActiveConv(conv)
-    setMessages([])
-    setConversations(prev => [conv, ...prev])
-    setLoading(false)
-    setTimeout(() => inputRef.current?.focus(), 100)
+    try {
+      const conv = await createConversation(initialContext)
+      setActiveConv(conv)
+      setMessages([])
+      setConversations(prev => [conv, ...prev])
+      setTimeout(() => inputRef.current?.focus(), 100)
+      return conv
+    } finally {
+      setLoading(false)
+    }
   }, [initialContext])
 
   // Auto-start if no conversations
@@ -147,9 +151,10 @@ export function AiChat({ initialContext = 'general', embedded = false, onClose, 
   const handleSend = async (text?: string) => {
     const userText = (text ?? input).trim()
     if (!userText || sending) return
-    if (!activeConv) await startNewConversation()
-
-    const conv = activeConv!
+    let conv = activeConv
+    if (!conv) {
+      conv = await startNewConversation()
+    }
     setInput('')
     setSending(true)
 

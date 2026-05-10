@@ -24,6 +24,12 @@ export function JobsPage() {
 export function SettingsPage() {
   return <ComingSoon title="Settings" desc="Coming soon" />
 }
+export function PrivacyPage() {
+  return <ComingSoon title="Privacy Policy" desc="Privacy details coming soon" />
+}
+export function TermsPage() {
+  return <ComingSoon title="Terms of Service" desc="Terms details coming soon" />
+}
 
 function ComingSoon({ title, desc }: { title: string; desc: string }) {
   return (
