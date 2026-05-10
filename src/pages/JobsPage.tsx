@@ -33,6 +33,7 @@ const statusClass: Record<AppStatus, string> = {
 }
 
 const ANTHROPIC_MODEL = 'claude-sonnet-4-20250514'
+const ANTHROPIC_API_VERSION = '2023-06-01'
 const RESUME_SYSTEM = 'You are an expert resume writer. Given the base resume and job description below, rewrite the resume to maximize ATS score and relevance for this specific role. Preserve all factual information — never invent experience or skills. Tailor the summary, reorder bullet points by relevance, and naturally incorporate keywords from the job description. Return the full rewritten resume as clean plain text.'
 const COVER_SYSTEM = 'You are an expert cover letter writer. Write a compelling, personalized cover letter for this job application based on the resume provided. Be specific, confident, and concise — three paragraphs max. Match the tone to the company. Return plain text only.'
 
@@ -157,7 +158,7 @@ export default function JobsPage() {
     if (!apiKey) throw new Error('Missing VITE_ANTHROPIC_API_KEY')
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': apiKey, accept: 'text/event-stream' },
+      headers: { 'content-type': 'application/json', 'anthropic-version': ANTHROPIC_API_VERSION, 'x-api-key': apiKey, accept: 'text/event-stream' },
       body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: 2048, stream: true, system, messages: [{ role: 'user', content: userText }] }),
     })
     if (!response.ok || !response.body) throw new Error(await response.text())
