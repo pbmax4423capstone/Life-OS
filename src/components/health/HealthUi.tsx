@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 
@@ -118,7 +118,7 @@ export function DomainModal({
   children: JSX.Element
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  const titleId = useRef(`domain-modal-title-${Math.random().toString(36).slice(2)}`)
+  const titleId = useId()
   const previousFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
@@ -186,12 +186,12 @@ export function DomainModal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId.current}
+        aria-labelledby={titleId}
         tabIndex={-1}
         className="relative w-full max-w-2xl card bg-slate-900 border-slate-700 max-h-[90vh] overflow-y-auto"
       >
         <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm p-4 border-b border-slate-700 flex items-center justify-between">
-          <h3 id={titleId.current} className="text-base font-semibold text-slate-100">{title}</h3>
+          <h3 id={titleId} className="text-base font-semibold text-slate-100">{title}</h3>
           <button className="btn-ghost p-1.5" onClick={onClose} aria-label="Close modal">
             <X size={16} />
           </button>
