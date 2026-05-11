@@ -48,13 +48,20 @@ export default function AuthPage() {
       .finally(() => setValidatingInvite(false))
   }, [inviteCode])
 
+  const normalizeAuthError = (msg: string): string => {
+    if (msg.includes('Invalid API key') || msg.includes('invalid_api_key')) {
+      return 'Unable to connect. Please refresh and try again.'
+    }
+    return msg
+  }
+
   const handleSubmit = async () => {
     setError(null)
     setSuccess(null)
     setLoading(true)
     if (mode === 'signin') {
       const { error } = await signIn(email, password)
-      if (error) setError(error)
+      if (error) setError(normalizeAuthError(error))
     } else {
       if (inviteCode && (validatingInvite || inviteError)) {
         setError(inviteError ?? 'Invite code validation failed')
@@ -66,7 +73,7 @@ export default function AuthPage() {
         code: inviteCode || undefined,
         planGrant: invitePlan ?? undefined,
       })
-      if (error) setError(error)
+      if (error) setError(normalizeAuthError(error))
       else setSuccess('Check your email to confirm your account.')
     }
     setLoading(false)
