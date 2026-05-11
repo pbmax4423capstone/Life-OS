@@ -23,8 +23,6 @@ export default function AuthPage() {
     [searchParams]
   )
 
-  if (session) return <Navigate to="/" replace />
-
   useEffect(() => {
     if (!inviteCode) {
       setInviteError(null)
@@ -74,6 +72,7 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      {session && <Navigate to="/" replace />}
       {/* Background glows */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-1/4 left-1/3 w-96 h-96 bg-brand-900/20 rounded-full blur-3xl" />
