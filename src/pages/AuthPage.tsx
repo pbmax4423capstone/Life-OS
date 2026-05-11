@@ -135,7 +135,13 @@ export default function AuthPage() {
               onKeyDown={e => e.key === 'Enter' && handleSubmit()} />
           </div>
 
-          {error && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
+          {error && (
+            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+              {error.includes('Invalid API key')
+                ? 'Configuration error — please contact support.'
+                : error}
+            </p>
+          )}
           {success && <p className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">{success}</p>}
 
           <button onClick={handleSubmit} disabled={loading}
