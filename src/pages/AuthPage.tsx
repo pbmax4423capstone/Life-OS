@@ -137,8 +137,8 @@ export default function AuthPage() {
 
           {error && (
             <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-              {error.includes('Invalid API key')
-                ? 'Configuration error — please contact support.'
+              {error.includes('Invalid API key') || error.includes('invalid_api_key')
+                ? 'Configuration error: the API key is invalid. Please contact support or check Vercel → Environment Variables → VITE_SUPABASE_ANON_KEY.'
                 : error}
             </p>
           )}
