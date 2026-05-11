@@ -106,7 +106,7 @@ export async function getConversations(): Promise<Conversation[]> {
     .order('pinned', { ascending: false })
     .order('last_message_at', { ascending: false })
     .limit(30)
-  if (error) throw error
+  if (error) return []
   return data ?? []
 }
 

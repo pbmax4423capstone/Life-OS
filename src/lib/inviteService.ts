@@ -65,7 +65,7 @@ export async function getMyInviteCodes(): Promise<InviteCode[]> {
     .from('invite_codes')
     .select('*')
     .order('created_at', { ascending: false })
-  if (error) throw error
+  if (error) return []
   return data ?? []
 }
 
@@ -134,7 +134,7 @@ export async function getSentInvitations(): Promise<EmailInvitation[]> {
     .from('email_invitations')
     .select('*')
     .order('created_at', { ascending: false })
-  if (error) throw error
+  if (error) return []
   return data ?? []
 }
 

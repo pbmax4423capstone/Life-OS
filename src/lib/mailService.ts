@@ -40,7 +40,7 @@ export async function getRecentDeliveries(limit = 7): Promise<MailDelivery[]> {
     .select('*')
     .order('delivery_date', { ascending: false })
     .limit(limit)
-  if (error) throw error
+  if (error) return []
   return data ?? []
 }
 
@@ -51,7 +51,7 @@ export async function getMailPieces(deliveryId: string): Promise<MailPiece[]> {
     .select('*')
     .eq('delivery_id', deliveryId)
     .order('sort_order')
-  if (error) throw error
+  if (error) return []
   return data ?? []
 }
 
