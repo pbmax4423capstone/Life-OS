@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
-import { Plus, Trash2, CreditCard, Loader2 } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload } from 'lucide-react'
 import { supabase, type FinancialAccount } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
+import { recognizeImage } from '@/lib/imageRecognition'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)
@@ -18,18 +19,32 @@ function typeBadge(t: string) {
   return 'bg-slate-700/50 text-slate-400 border border-slate-600/50'
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve((reader.result as string).split(',')[1])
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+const BLANK_FORM = {
+  nickname: '', account_type: 'Checking', institution_name: '',
+  last_four: '', current_balance: '', interest_rate: '', credit_limit: '',
+  rewards_balance: '', color: COLORS[0],
+}
+
 export default function AccountsPage() {
   const { user } = useAuthStore()
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
   const [tab, setTab] = useState('All')
-  const [form, setForm] = useState({
-    nickname: '', account_type: 'Checking', institution_name: '',
-    last_four: '', current_balance: '', interest_rate: '', credit_limit: '',
-    rewards_balance: '', color: COLORS[0],
-  })
+  const [form, setForm] = useState(BLANK_FORM)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -38,6 +53,59 @@ export default function AccountsPage() {
       .then(({ data }) => { setAccounts(data ?? []); setLoading(false) })
   }, [user])
 
+  // ── AI scan: process image → pre-fill form ────────────────
+  const scanImage = async (file: File) => {
+    setScanning(true)
+    setScanError(null)
+    try {
+      const base64 = await fileToBase64(file)
+      const result = await recognizeImage(base64, file.type)
+      const f = result.fields as Record<string, unknown>
+
+      const isBank = result.detectedType === 'bank_statement'
+      const isCreditCard = result.detectedType === 'credit_card_statement'
+
+      setForm({
+        institution_name: String(f.institution ?? ''),
+        nickname: '',
+        account_type: isBank
+          ? (String(f.account_type ?? 'checking').charAt(0).toUpperCase() + String(f.account_type ?? 'checking').slice(1))
+          : isCreditCard ? 'Credit Card' : 'Checking',
+        last_four: String(f.last_four ?? ''),
+        current_balance: f.balance != null ? String(f.balance) : '',
+        interest_rate: f.apr != null ? String(f.apr) : '',
+        credit_limit: f.credit_limit != null ? String(f.credit_limit) : '',
+        rewards_balance: f.rewards_points != null ? String(f.rewards_points) : '',
+        color: isCreditCard ? '#f59e0b' : isBank ? '#10b981' : COLORS[0],
+      })
+      setShowAdd(true)
+    } catch (e) {
+      setScanError(e instanceof Error ? e.message : 'Scan failed — try again or enter details manually')
+    }
+    setScanning(false)
+  }
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) scanImage(file)
+    e.target.value = ''
+  }
+
+  // Paste inside the modal's paste zone (stop propagation so global handler doesn't fire)
+  const handleModalPaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.stopPropagation()
+        const file = item.getAsFile()
+        if (file) scanImage(file)
+        break
+      }
+    }
+  }
+
+  // ── Account CRUD ──────────────────────────────────────────
   const tabs = ['All', 'Assets', 'Debt', 'Investments']
   const filtered = accounts.filter(a => {
     if (tab === 'Assets') return ['checking', 'savings', 'cd'].includes(a.account_type)
@@ -71,7 +139,7 @@ export default function AccountsPage() {
     if (!error && data) setAccounts(p => [...p, data])
     setSaving(false)
     setShowAdd(false)
-    setForm({ nickname: '', account_type: 'Checking', institution_name: '', last_four: '', current_balance: '', interest_rate: '', credit_limit: '', rewards_balance: '', color: COLORS[0] })
+    setForm(BLANK_FORM)
   }
 
   const del = async (id: string) => {
@@ -87,17 +155,37 @@ export default function AccountsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      {/* Hidden file input */}
+      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
+
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Accounts</h1>
           <p className="text-sm text-slate-400 mt-0.5">
             Net Worth: <span className={`font-semibold ${netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmt(netWorth)}</span>
           </p>
         </div>
-        <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2">
-          <Plus size={16} /> Add Account
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={scanning}
+            className="btn-ghost flex items-center gap-2 border border-slate-700"
+          >
+            {scanning
+              ? <><Loader2 size={15} className="animate-spin text-brand-400" /> Scanning…</>
+              : <><ScanLine size={15} className="text-brand-400" /> Import Snip</>}
+          </button>
+          <button onClick={() => { setForm(BLANK_FORM); setScanError(null); setShowAdd(true) }} className="btn-primary flex items-center gap-2">
+            <Plus size={16} /> Add Account
+          </button>
+        </div>
       </div>
+
+      {scanError && (
+        <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2.5 flex items-center gap-2">
+          <span className="font-medium">Scan error:</span> {scanError}
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-4">
         {[
@@ -125,10 +213,16 @@ export default function AccountsPage() {
         <div className="card p-12 text-center">
           <CreditCard size={40} className="text-slate-700 mx-auto mb-3" />
           <h3 className="text-lg font-semibold text-slate-300">No accounts yet</h3>
-          <p className="text-sm text-slate-500 mt-1">Add your first account to track balances and debt</p>
-          <button onClick={() => setShowAdd(true)} className="btn-primary mt-4 mx-auto flex items-center gap-2">
-            <Plus size={14} /> Add Account
-          </button>
+          <p className="text-sm text-slate-500 mt-1 mb-4">Add manually or import from a screenshot</p>
+          <div className="flex gap-3 justify-center flex-wrap">
+            <button onClick={() => fileInputRef.current?.click()} disabled={scanning}
+              className="btn-ghost flex items-center gap-2 border border-slate-700">
+              <ScanLine size={15} className="text-brand-400" /> Import Snip
+            </button>
+            <button onClick={() => { setForm(BLANK_FORM); setShowAdd(true) }} className="btn-primary flex items-center gap-2">
+              <Plus size={14} /> Add Manually
+            </button>
+          </div>
         </div>
       ) : (
         <div className="card p-0 overflow-hidden">
@@ -177,10 +271,55 @@ export default function AccountsPage() {
         </div>
       )}
 
+      {/* Add / Edit modal */}
       {showAdd && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-100 mb-5">Add Account</h3>
+
+            <h3 className="text-lg font-bold text-slate-100 mb-4">
+              {form.institution_name ? 'Review Scanned Account' : 'Add Account'}
+            </h3>
+
+            {/* ── Paste / drop zone ── */}
+            <div
+              className={`mb-5 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all group
+                ${scanning
+                  ? 'border-brand-500/60 bg-brand-500/5'
+                  : 'border-slate-700 hover:border-brand-500/50 hover:bg-brand-500/5'}`}
+              onClick={() => !scanning && fileInputRef.current?.click()}
+              onPaste={handleModalPaste}
+              // Make focusable so keyboard paste lands here
+              tabIndex={0}
+              onKeyDown={e => e.key === 'Enter' && !scanning && fileInputRef.current?.click()}
+            >
+              {scanning ? (
+                <div className="flex items-center justify-center gap-2 text-brand-400">
+                  <Loader2 size={18} className="animate-spin" />
+                  <span className="text-sm font-medium">Scanning with AI…</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-center gap-2 text-slate-400 group-hover:text-brand-400 transition-colors mb-1">
+                    <ScanLine size={18} />
+                    <span className="text-sm font-medium">Paste or click to import a screenshot</span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    Bank statement · Credit card statement · Any account summary
+                  </p>
+                  <p className="text-xs text-slate-700 mt-1">
+                    Ctrl+V / ⌘+V while focused here · or click to browse
+                  </p>
+                </>
+              )}
+            </div>
+
+            {scanError && (
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mb-4">
+                {scanError}
+              </p>
+            )}
+
+            {/* ── Form fields ── */}
             <div className="space-y-4">
               <div>
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Institution Name *</label>
@@ -233,12 +372,22 @@ export default function AccountsPage() {
                 </div>
               </div>
             </div>
+
             <div className="flex gap-3 mt-6">
-              <button onClick={add} disabled={saving || !form.institution_name} className="btn-primary flex-1 justify-center flex items-center gap-2">
+              <button onClick={add} disabled={saving || !form.institution_name || scanning} className="btn-primary flex-1 justify-center flex items-center gap-2">
                 {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Account'}
               </button>
-              <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
+              <button onClick={() => { setShowAdd(false); setScanError(null) }} className="btn-ghost">Cancel</button>
             </div>
+
+            {/* Re-scan shortcut inside modal */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={scanning}
+              className="w-full mt-3 flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-brand-400 transition-colors py-1"
+            >
+              <Upload size={12} /> Browse for a different screenshot
+            </button>
           </div>
         </div>
       )}
