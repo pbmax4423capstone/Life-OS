@@ -7,10 +7,16 @@ import LandingPage from '@/pages/LandingPage'
 import ChatPage from '@/pages/ChatPage'
 import DebtPlannerPage from '@/pages/finance/DebtPlannerPage'
 import RetirementLoanPage from '@/pages/finance/RetirementLoanPage'
-import {
-  AccountsPage, PaymentsPage, AnalyticsPage,
-  RewardsPage, TravelPage, HealthPage, JobsPage, SettingsPage, PrivacyPage, TermsPage
-} from '@/pages/StubPages'
+import AccountsPage from '@/pages/AccountsPage'
+import PaymentsPage from '@/pages/PaymentsPage'
+import AnalyticsPage from '@/pages/AnalyticsPage'
+import CreditPage from '@/pages/CreditPage'
+import HealthPage from '@/pages/HealthPage'
+import JobsPage from '@/pages/JobsPage'
+import ProDevPage from '@/pages/ProDevPage'
+import TravelPage from '@/pages/TravelPage'
+import DocumentsPage from '@/pages/DocumentsPage'
+import { SettingsPage, PrivacyPage, TermsPage } from '@/pages/StubPages'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuthStore()
@@ -37,14 +43,16 @@ const router = createBrowserRouter([
       { path: 'accounts',               element: <AccountsPage /> },
       { path: 'payments',               element: <PaymentsPage /> },
       { path: 'analytics',              element: <AnalyticsPage /> },
-      { path: 'rewards',                element: <RewardsPage /> },
-      { path: 'travel',                 element: <TravelPage /> },
-      { path: 'health',                 element: <HealthPage /> },
-      { path: 'jobs',                   element: <JobsPage /> },
-      { path: 'settings',               element: <SettingsPage /> },
-      { path: 'chat',                   element: <ChatPage /> },
+      { path: 'credit',                 element: <CreditPage /> },
       { path: 'finance/debt-planner',   element: <DebtPlannerPage /> },
       { path: 'finance/retirement',     element: <RetirementLoanPage /> },
+      { path: 'health',                 element: <HealthPage /> },
+      { path: 'jobs',                   element: <JobsPage /> },
+      { path: 'prodev',                 element: <ProDevPage /> },
+      { path: 'travel',                 element: <TravelPage /> },
+      { path: 'documents',              element: <DocumentsPage /> },
+      { path: 'settings',               element: <SettingsPage /> },
+      { path: 'chat',                   element: <ChatPage /> },
     ],
   },
 ])
