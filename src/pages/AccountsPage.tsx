@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload, Pencil, TrendingUp, TrendingDown } from 'lucide-react'
+import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload, Pencil, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { recognizeImage } from '@/lib/imageRecognition'
@@ -7,10 +8,31 @@ import { recognizeImage } from '@/lib/imageRecognition'
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)
 
-const ASSET_TYPES = ['Checking', 'Savings', 'Investment', 'Retirement', 'CD', 'Other']
-const DEBT_TYPES_LABELS = ['Credit Card', 'Buy Now Pay Later', 'Mortgage', 'Auto Loan', 'Student Loan']
-const ACCOUNT_TYPES = [...ASSET_TYPES, ...DEBT_TYPES_LABELS]
-const DEBT_TYPES = ['credit_card', 'buy_now_pay_later', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan']
+// ── Category definitions ──────────────────────────────────────
+type AccountKind = 'asset' | 'investment' | 'debt' | ''
+
+const CATEGORY_CONFIG = {
+  asset:      { label: 'Asset',      desc: 'Checking, Savings, CD',         icon: TrendingUp,  border: 'hover:border-emerald-500/60 hover:bg-emerald-500/5', badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', default: 'Checking' },
+  investment: { label: 'Investment', desc: 'Brokerage, Retirement',          icon: BarChart2,   border: 'hover:border-indigo-500/60 hover:bg-indigo-500/5',  badge: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/25',  default: 'Investment' },
+  debt:       { label: 'Debt',       desc: 'Credit Card, Loans, BNPL',       icon: TrendingDown,border: 'hover:border-red-500/60 hover:bg-red-500/5',        badge: 'bg-red-500/15 text-red-400 border-red-500/25',          default: 'Credit Card' },
+}
+
+const TYPE_OPTIONS: Record<string, string[]> = {
+  asset:      ['Checking', 'Savings', 'CD', 'Other'],
+  investment: ['Investment', 'Retirement'],
+  debt:       ['Credit Card', 'Buy Now Pay Later', 'Mortgage', 'Auto Loan', 'Student Loan'],
+}
+
+const ACCOUNT_TYPES = [...TYPE_OPTIONS.asset, ...TYPE_OPTIONS.investment, ...TYPE_OPTIONS.debt]
+const DEBT_TYPES    = ['credit_card', 'buy_now_pay_later', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan', 'heloc']
+const INV_TYPES     = ['investment', 'retirement']
+
+function getCategory(t: string): 'asset' | 'investment' | 'debt' {
+  if (INV_TYPES.includes(t))  return 'investment'
+  if (DEBT_TYPES.includes(t)) return 'debt'
+  return 'asset'
+}
+
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
 const INTERVALS = ['Weekly', 'Biweekly', 'Semi-Monthly', 'Monthly', 'Quarterly']
 
@@ -34,8 +56,8 @@ function typeBadge(t: string) {
   if (['checking', 'savings', 'cd'].includes(t)) return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
   if (t === 'credit_card') return 'bg-amber-500/15 text-amber-400 border-amber-500/25'
   if (t === 'buy_now_pay_later') return 'bg-purple-500/15 text-purple-400 border-purple-500/25'
-  if (['mortgage', 'auto_loan', 'student_loan', 'personal_loan'].includes(t)) return 'bg-red-500/15 text-red-400 border-red-500/25'
-  if (['investment', 'retirement'].includes(t)) return 'bg-indigo-500/15 text-indigo-400 border-indigo-500/25'
+  if (['mortgage', 'auto_loan', 'student_loan', 'personal_loan', 'heloc'].includes(t)) return 'bg-red-500/15 text-red-400 border-red-500/25'
+  if (INV_TYPES.includes(t)) return 'bg-indigo-500/15 text-indigo-400 border-indigo-500/25'
   return 'bg-slate-700/50 text-slate-400 border-slate-600/50'
 }
 
@@ -58,7 +80,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 const BLANK_FORM = {
-  accountKind: '' as 'asset' | 'debt' | '',   // first-step choice
+  accountKind: '' as AccountKind,
   nickname: '', account_type: 'Checking', institution_name: '',
   last_four: '', current_balance: '', interest_rate: '', credit_limit: '',
   rewards_balance: '', color: COLORS[0],
@@ -71,6 +93,7 @@ type FormState = typeof BLANK_FORM
 
 export default function AccountsPage() {
   const { user } = useAuthStore()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
   const [scheduledPayments, setScheduledPayments] = useState<ScheduledPayment[]>([])
   const [loading, setLoading] = useState(true)
@@ -93,8 +116,18 @@ export default function AccountsPage() {
       setAccounts(accs ?? [])
       setScheduledPayments(pmts ?? [])
       setLoading(false)
+
+      // Auto-open edit modal if navigated here with ?edit=<id>
+      const editId = searchParams.get('edit')
+      if (editId && accs) {
+        const target = accs.find(a => a.id === editId)
+        if (target) {
+          openEdit(target)
+          setSearchParams({})
+        }
+      }
     })
-  }, [user])
+  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Tabs ─────────────────────────────────────────────────────
   const tabs = ['All', 'Assets', 'Debt', 'Investments']
@@ -128,10 +161,10 @@ export default function AccountsPage() {
   // ── Open edit modal ──────────────────────────────────────────
   const openEdit = (a: FinancialAccount) => {
     setEditAccount(a)
-    const isDebtType = DEBT_TYPES.includes(a.account_type)
+    const cat = getCategory(a.account_type)
     const extras = bnplData[a.id]
     setForm({
-      accountKind: isDebtType ? 'debt' : 'asset',
+      accountKind: cat,
       nickname: a.nickname ?? '',
       account_type: a.account_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
         .replace('Buy Now Pay Later', 'Buy Now Pay Later'),
@@ -254,28 +287,30 @@ export default function AccountsPage() {
 
         // Create/update the linked ScheduledPayment when payment details are provided
         if (form.bnpl_payment_amount && form.bnpl_due_date) {
-          const existing = scheduledPayments.find(p => p.from_account_id === accountId)
-          const pmtPayload = {
-            owner_id: user.id,
-            from_account_id: accountId,
-            payee_name: form.institution_name,
-            amount: parseFloat(form.bnpl_payment_amount),
-            next_due_date: form.bnpl_due_date,
-            frequency: form.bnpl_interval.toLowerCase().replace(/\s+/g, '_'),
-            auto_pay: form.bnpl_auto_pay,
-            status: 'active',
-            memo: JSON.stringify({ payments_remaining: parseInt(form.bnpl_payments_remaining) || null }),
-          }
-          if (existing) {
-            const { data: updated, error } = await supabase.from('scheduled_payments')
-              .update(pmtPayload).eq('id', existing.id).select('*').single()
-            if (error) throw new Error(`Payment schedule: ${error.message}`)
-            if (updated) setScheduledPayments(p => p.map(x => x.id === updated.id ? updated : x))
-          } else {
-            const { data: created, error } = await supabase.from('scheduled_payments')
-              .insert(pmtPayload).select('*').single()
-            if (error) throw new Error(`Payment schedule: ${error.message}`)
-            if (created) setScheduledPayments(p => [...p, created])
+          try {
+            const existing = scheduledPayments.find(p => p.from_account_id === accountId)
+            const pmtPayload = {
+              owner_id: user.id,
+              from_account_id: accountId!,
+              payee_name: form.institution_name,
+              amount: parseFloat(form.bnpl_payment_amount),
+              next_due_date: form.bnpl_due_date,
+              frequency: form.bnpl_interval.toLowerCase().replace(/\s+/g, '_'),
+              auto_pay: form.bnpl_auto_pay,
+              status: 'active',
+              memo: JSON.stringify({ payments_remaining: parseInt(form.bnpl_payments_remaining) || null }),
+            }
+            if (existing) {
+              const { data: updated } = await supabase.from('scheduled_payments')
+                .update(pmtPayload).eq('id', existing.id).select('*').single()
+              if (updated) setScheduledPayments(p => p.map(x => x.id === updated.id ? updated : x))
+            } else {
+              const { data: created } = await supabase.from('scheduled_payments')
+                .insert(pmtPayload).select('*').single()
+              if (created) setScheduledPayments(p => [...p, created])
+            }
+          } catch {
+            // Payment scheduling failed — account still saved; user can schedule in Payments page
           }
         }
       }
@@ -381,7 +416,7 @@ export default function AccountsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-800">
-                {['Account', 'Type', 'Balance', 'Rate', 'Next Payment', 'Rewards / Info', ''].map(h => (
+                {['Account', 'Category', 'Type', 'Balance', 'Rate', 'Next Payment', 'Rewards / Info', ''].map(h => (
                   <th key={h} className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400 px-5 py-3">{h}</th>
                 ))}
               </tr>
@@ -409,6 +444,13 @@ export default function AccountsPage() {
                           <div className="text-xs text-slate-500">{a.institution_name}{a.last_four ? ` ···${a.last_four}` : ''}</div>
                         </div>
                       </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      {(() => {
+                        const cat = getCategory(a.account_type)
+                        const cfg = CATEGORY_CONFIG[cat]
+                        return <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${cfg.badge}`}>{cfg.label}</span>
+                      })()}
                     </td>
                     <td className="px-5 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${typeBadge(a.account_type)}`}>
@@ -482,46 +524,31 @@ export default function AccountsPage() {
               {editAccount ? `Edit — ${editAccount.nickname ?? editAccount.institution_name}` : 'Add Account'}
             </h3>
 
-            {/* ── Step 1: asset or debt? (add mode only) ── */}
+            {/* ── Step 1: asset / investment / debt? (add mode only) ── */}
             {!editAccount && !form.accountKind && (
               <div>
-                <p className="text-sm text-slate-400 mb-5">
-                  Is this account an <span className="text-emerald-400 font-medium">asset</span> (money you have) or a <span className="text-red-400 font-medium">debt</span> (money you owe)?
-                </p>
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Asset choice */}
-                  <button
-                    onClick={() => setForm(p => ({ ...p, accountKind: 'asset', account_type: 'Checking' }))}
-                    className="group flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-slate-700 hover:border-emerald-500/60 hover:bg-emerald-500/5 transition-all text-center"
-                  >
-                    <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 flex items-center justify-center group-hover:bg-emerald-500/25 transition-colors">
-                      <TrendingUp size={28} className="text-emerald-400" />
-                    </div>
-                    <div>
-                      <div className="text-base font-bold text-slate-100 mb-1">Asset</div>
-                      <div className="text-xs text-slate-500 leading-relaxed">
-                        Checking, Savings,<br />Investment, Retirement
-                      </div>
-                    </div>
-                  </button>
-
-                  {/* Debt choice */}
-                  <button
-                    onClick={() => setForm(p => ({ ...p, accountKind: 'debt', account_type: 'Credit Card' }))}
-                    className="group flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-slate-700 hover:border-red-500/60 hover:bg-red-500/5 transition-all text-center"
-                  >
-                    <div className="w-14 h-14 rounded-2xl bg-red-500/15 flex items-center justify-center group-hover:bg-red-500/25 transition-colors">
-                      <TrendingDown size={28} className="text-red-400" />
-                    </div>
-                    <div>
-                      <div className="text-base font-bold text-slate-100 mb-1">Debt</div>
-                      <div className="text-xs text-slate-500 leading-relaxed">
-                        Credit Card, BNPL,<br />Mortgage, Loan
-                      </div>
-                    </div>
-                  </button>
+                <p className="text-sm text-slate-400 mb-5">What kind of account is this?</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {(Object.entries(CATEGORY_CONFIG) as [AccountKind, typeof CATEGORY_CONFIG[keyof typeof CATEGORY_CONFIG]][])
+                    .filter(([k]) => k !== '')
+                    .map(([kind, cfg]) => {
+                      const Icon = cfg.icon
+                      return (
+                        <button key={kind}
+                          onClick={() => setForm(p => ({ ...p, accountKind: kind, account_type: cfg.default }))}
+                          className={`group flex flex-col items-center gap-2 p-5 rounded-2xl border-2 border-slate-700 ${cfg.border} transition-all text-center`}
+                        >
+                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${cfg.badge.replace('text-', 'bg-').replace(/\s.*/, '')} opacity-50 group-hover:opacity-100`}>
+                            <Icon size={24} className={cfg.badge.split(' ')[1]} />
+                          </div>
+                          <div>
+                            <div className="text-sm font-bold text-slate-100 mb-0.5">{cfg.label}</div>
+                            <div className="text-xs text-slate-500 leading-relaxed">{cfg.desc}</div>
+                          </div>
+                        </button>
+                      )
+                    })}
                 </div>
-
                 <button onClick={() => { setShowModal(false); setScanError(null) }}
                   className="w-full mt-5 text-xs text-slate-500 hover:text-slate-300 transition-colors py-1">
                   Cancel
@@ -535,11 +562,19 @@ export default function AccountsPage() {
                 {/* Kind indicator + change link (add mode only) */}
                 {!editAccount && form.accountKind && (
                   <div className="flex items-center justify-between mb-5 px-3 py-2 rounded-xl bg-slate-800/60 border border-slate-700/50">
-                    <div className="flex items-center gap-2">
-                      {form.accountKind === 'asset'
-                        ? <><TrendingUp size={14} className="text-emerald-400" /><span className="text-sm font-medium text-emerald-400">Asset account</span></>
-                        : <><TrendingDown size={14} className="text-red-400" /><span className="text-sm font-medium text-red-400">Debt account</span></>}
-                    </div>
+                    {(() => {
+                      const k = form.accountKind as keyof typeof CATEGORY_CONFIG
+                      const cfg = CATEGORY_CONFIG[k]
+                      const Icon = cfg?.icon ?? TrendingUp
+                      return (
+                        <div className="flex items-center gap-2">
+                          <Icon size={14} className={cfg?.badge.split(' ')[1] ?? 'text-slate-400'} />
+                          <span className={`text-sm font-medium ${cfg?.badge.split(' ')[1] ?? 'text-slate-400'}`}>
+                            {cfg?.label ?? k} account
+                          </span>
+                        </div>
+                      )
+                    })()}
                     <button onClick={() => setForm(p => ({ ...p, accountKind: '' }))}
                       className="text-xs text-slate-500 hover:text-brand-400 transition-colors">
                       ← Change
@@ -594,7 +629,7 @@ export default function AccountsPage() {
                     <select value={form.account_type} onChange={e => setForm(p => ({ ...p, account_type: e.target.value }))} className="input-base">
                       {(editAccount
                         ? ACCOUNT_TYPES
-                        : form.accountKind === 'asset' ? ASSET_TYPES : DEBT_TYPES_LABELS
+                        : form.accountKind ? TYPE_OPTIONS[form.accountKind] ?? ACCOUNT_TYPES : ACCOUNT_TYPES
                       ).map(t => <option key={t}>{t}</option>)}
                     </select>
                   </div>

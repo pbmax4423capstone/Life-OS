@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { TrendingUp, TrendingDown, Wallet, Star, CalendarDays, Pencil, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { MailWidget } from '@/components/mail/MailWidget'
@@ -181,6 +182,7 @@ function PaydayPlanner({
 // ── Dashboard ─────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user } = useAuthStore()
+  const navigate = useNavigate()
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
   const [payments, setPayments] = useState<ScheduledPayment[]>([])
   const [loading, setLoading] = useState(true)
@@ -292,14 +294,17 @@ export default function DashboardPage() {
             <p className="text-sm text-slate-500">No asset accounts found.</p>
           ) : (
             <div className="space-y-3">
-              {accounts.filter(a => a.current_balance > 0).map(a => {
+                  {accounts.filter(a => a.current_balance > 0).map(a => {
                 // Payments sourced from this account
                 const accountPayments = payments.filter(p => p.from_account_id === a.id)
                 const totalScheduled = accountPayments.reduce((s, p) => s + p.amount, 0)
                 const afterPayments = a.current_balance - totalScheduled
 
                 return (
-                  <div key={a.id} className="flex items-center gap-4 p-3 rounded-xl bg-slate-900/60 border border-slate-800/60">
+                  <div key={a.id}
+                    className="flex items-center gap-4 p-3 rounded-xl bg-slate-900/60 border border-slate-800/60 cursor-pointer hover:border-slate-600 hover:bg-slate-800/60 transition-all group"
+                    onClick={() => navigate(`/accounts?edit=${a.id}`)}
+                  >
                     <div className="w-2 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-0.5">
@@ -396,11 +401,18 @@ export default function DashboardPage() {
           <h2 className="text-base font-semibold text-slate-100 mb-4">All Accounts</h2>
           <div className="space-y-3">
             {accounts.map(a => (
-              <div key={a.id} className="flex items-center gap-3">
+              <div key={a.id}
+                className="flex items-center gap-3 cursor-pointer rounded-lg px-2 py-1 -mx-2 hover:bg-slate-800/50 transition-colors group"
+                onClick={() => navigate(`/accounts?edit=${a.id}`)}
+                title="Click to edit"
+              >
                 <div className="w-2 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-200 truncate">{a.nickname ?? a.institution_name}</span>
+                    <span className="text-sm font-medium text-slate-200 truncate flex items-center gap-1.5">
+                      {a.nickname ?? a.institution_name}
+                      <Pencil size={11} className="text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </span>
                     <span className={`text-sm font-semibold ${a.current_balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {fmtDec(a.current_balance)}
                     </span>
