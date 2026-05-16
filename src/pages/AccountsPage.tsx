@@ -490,14 +490,23 @@ export default function AccountsPage() {
         if (error) throw new Error(error.message)
         if (data) setAccounts(p => p.map(a => a.id === data.id ? data : a))
       } else {
-        const insertPromise = supabase.from('financial_accounts').insert({
-          ...payload, owner_id: user.id, status: 'active', sort_order: accounts.length,
-          rewards_unit: 'points', rewards_cpp: 0.01, icon: iconValue,
+        const { data, error } = await supabase.from('financial_accounts').insert({
+          account_type: dbType,
+          institution_name: form.institution_name,
+          nickname: form.nickname || null,
+          last_four: form.last_four || null,
+          current_balance: (form.accountKind === 'debt' || (editAccount && DEBT_TYPES.includes(getDisplayType(editAccount))))
+            ? -(Math.abs(parseFloat(form.current_balance) || 0))
+            : parseFloat(form.current_balance) || 0,
+          interest_rate: form.interest_rate !== '' ? parseFloat(form.interest_rate) : null,
+          credit_limit: form.credit_limit ? parseFloat(form.credit_limit) : null,
+          rewards_balance: parseFloat(form.rewards_balance) || 0,
+          color: form.color,
+          owner_id: user.id,
+          status: 'active',
+          sort_order: accounts.length,
+          icon: iconValue,
         }).select('*').single()
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Request timed out — check your connection and try again')), 30000)
-        )
-        const { data, error } = await Promise.race([insertPromise, timeoutPromise])
         if (error) throw new Error(error.message)
         if (data) { setAccounts(p => [...p, data]); accountId = data.id }
       }
