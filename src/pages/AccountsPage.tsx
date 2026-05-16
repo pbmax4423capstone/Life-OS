@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload, Pencil } from 'lucide-react'
+import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload, Pencil, TrendingUp, TrendingDown } from 'lucide-react'
 import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { recognizeImage } from '@/lib/imageRecognition'
@@ -7,10 +7,9 @@ import { recognizeImage } from '@/lib/imageRecognition'
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)
 
-const ACCOUNT_TYPES = [
-  'Checking', 'Savings', 'Credit Card', 'Buy Now Pay Later',
-  'Mortgage', 'Auto Loan', 'Student Loan', 'Investment', 'Retirement', 'CD', 'Other',
-]
+const ASSET_TYPES = ['Checking', 'Savings', 'Investment', 'Retirement', 'CD', 'Other']
+const DEBT_TYPES_LABELS = ['Credit Card', 'Buy Now Pay Later', 'Mortgage', 'Auto Loan', 'Student Loan']
+const ACCOUNT_TYPES = [...ASSET_TYPES, ...DEBT_TYPES_LABELS]
 const DEBT_TYPES = ['credit_card', 'buy_now_pay_later', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan']
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
 const INTERVALS = ['Weekly', 'Biweekly', 'Semi-Monthly', 'Monthly', 'Quarterly']
@@ -59,6 +58,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 const BLANK_FORM = {
+  accountKind: '' as 'asset' | 'debt' | '',   // first-step choice
   nickname: '', account_type: 'Checking', institution_name: '',
   last_four: '', current_balance: '', interest_rate: '', credit_limit: '',
   rewards_balance: '', color: COLORS[0],
@@ -128,8 +128,10 @@ export default function AccountsPage() {
   // ── Open edit modal ──────────────────────────────────────────
   const openEdit = (a: FinancialAccount) => {
     setEditAccount(a)
+    const isDebtType = DEBT_TYPES.includes(a.account_type)
     const extras = bnplData[a.id]
     setForm({
+      accountKind: isDebtType ? 'debt' : 'asset',
       nickname: a.nickname ?? '',
       account_type: a.account_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
         .replace('Buy Now Pay Later', 'Buy Now Pay Later'),
@@ -452,7 +454,6 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {/* ── Add / Edit Modal ── */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
@@ -460,158 +461,225 @@ export default function AccountsPage() {
               {editAccount ? `Edit — ${editAccount.nickname ?? editAccount.institution_name}` : 'Add Account'}
             </h3>
 
-            {/* Paste / scan zone (only in add mode) */}
-            {!editAccount && (
-              <div
-                className={`mb-5 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all
-                  ${scanning ? 'border-brand-500/60 bg-brand-500/5' : 'border-slate-700 hover:border-brand-500/50 hover:bg-brand-500/5'}`}
-                onClick={() => !scanning && fileInputRef.current?.click()}
-                onPaste={handleModalPaste}
-                tabIndex={0}
-              >
-                {scanning ? (
-                  <div className="flex items-center justify-center gap-2 text-brand-400">
-                    <Loader2 size={16} className="animate-spin" />
-                    <span className="text-sm font-medium">Scanning with AI…</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-center gap-2 text-slate-400 hover:text-brand-400 mb-1">
-                      <ScanLine size={16} />
-                      <span className="text-sm font-medium">Paste or click to scan a statement screenshot</span>
+            {/* ── Step 1: asset or debt? (add mode only) ── */}
+            {!editAccount && !form.accountKind && (
+              <div>
+                <p className="text-sm text-slate-400 mb-5">
+                  Is this account an <span className="text-emerald-400 font-medium">asset</span> (money you have) or a <span className="text-red-400 font-medium">debt</span> (money you owe)?
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Asset choice */}
+                  <button
+                    onClick={() => setForm(p => ({ ...p, accountKind: 'asset', account_type: 'Checking' }))}
+                    className="group flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-slate-700 hover:border-emerald-500/60 hover:bg-emerald-500/5 transition-all text-center"
+                  >
+                    <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 flex items-center justify-center group-hover:bg-emerald-500/25 transition-colors">
+                      <TrendingUp size={28} className="text-emerald-400" />
                     </div>
-                    <p className="text-xs text-slate-600">Bank statement · Credit card · Any account summary</p>
-                  </>
-                )}
+                    <div>
+                      <div className="text-base font-bold text-slate-100 mb-1">Asset</div>
+                      <div className="text-xs text-slate-500 leading-relaxed">
+                        Checking, Savings,<br />Investment, Retirement
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Debt choice */}
+                  <button
+                    onClick={() => setForm(p => ({ ...p, accountKind: 'debt', account_type: 'Credit Card' }))}
+                    className="group flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-slate-700 hover:border-red-500/60 hover:bg-red-500/5 transition-all text-center"
+                  >
+                    <div className="w-14 h-14 rounded-2xl bg-red-500/15 flex items-center justify-center group-hover:bg-red-500/25 transition-colors">
+                      <TrendingDown size={28} className="text-red-400" />
+                    </div>
+                    <div>
+                      <div className="text-base font-bold text-slate-100 mb-1">Debt</div>
+                      <div className="text-xs text-slate-500 leading-relaxed">
+                        Credit Card, BNPL,<br />Mortgage, Loan
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                <button onClick={() => { setShowModal(false); setScanError(null) }}
+                  className="w-full mt-5 text-xs text-slate-500 hover:text-slate-300 transition-colors py-1">
+                  Cancel
+                </button>
               </div>
             )}
 
-            {scanError && (
-              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mb-4">{scanError}</p>
-            )}
-
-            {/* Base fields */}
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs text-slate-400 font-medium mb-1.5 block">Institution Name *</label>
-                <input value={form.institution_name} onChange={e => setForm(p => ({ ...p, institution_name: e.target.value }))}
-                  className="input-base" placeholder="Chase, Afterpay, Klarna…" />
-              </div>
-              <div>
-                <label className="text-xs text-slate-400 font-medium mb-1.5 block">Nickname (optional)</label>
-                <input value={form.nickname} onChange={e => setForm(p => ({ ...p, nickname: e.target.value }))}
-                  className="input-base" placeholder="My Checking" />
-              </div>
-              <div>
-                <label className="text-xs text-slate-400 font-medium mb-1.5 block">Account Type</label>
-                <select value={form.account_type} onChange={e => setForm(p => ({ ...p, account_type: e.target.value }))} className="input-base">
-                  {ACCOUNT_TYPES.map(t => <option key={t}>{t}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-slate-400 font-medium mb-1.5 block">
-                    {isBNPLForm ? 'Remaining Balance ($)' : 'Balance ($)'}
-                  </label>
-                  <input type="number" value={form.current_balance} onChange={e => setForm(p => ({ ...p, current_balance: e.target.value }))}
-                    className="input-base" placeholder="0.00" />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 font-medium mb-1.5 block">APR / APY (%)</label>
-                  <input type="number" value={form.interest_rate} onChange={e => setForm(p => ({ ...p, interest_rate: e.target.value }))}
-                    className="input-base" placeholder="0.00" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-slate-400 font-medium mb-1.5 block">Last 4 Digits</label>
-                  <input maxLength={4} value={form.last_four} onChange={e => setForm(p => ({ ...p, last_four: e.target.value }))}
-                    className="input-base" placeholder="0000" />
-                </div>
-                {!isBNPLForm && (
-                  <div>
-                    <label className="text-xs text-slate-400 font-medium mb-1.5 block">Credit Limit ($)</label>
-                    <input type="number" value={form.credit_limit} onChange={e => setForm(p => ({ ...p, credit_limit: e.target.value }))}
-                      className="input-base" placeholder="Optional" />
+            {/* ── Step 2: account form (shown once kind is chosen) ── */}
+            {(editAccount || form.accountKind) && (
+              <>
+                {/* Kind indicator + change link (add mode only) */}
+                {!editAccount && form.accountKind && (
+                  <div className="flex items-center justify-between mb-5 px-3 py-2 rounded-xl bg-slate-800/60 border border-slate-700/50">
+                    <div className="flex items-center gap-2">
+                      {form.accountKind === 'asset'
+                        ? <><TrendingUp size={14} className="text-emerald-400" /><span className="text-sm font-medium text-emerald-400">Asset account</span></>
+                        : <><TrendingDown size={14} className="text-red-400" /><span className="text-sm font-medium text-red-400">Debt account</span></>}
+                    </div>
+                    <button onClick={() => setForm(p => ({ ...p, accountKind: '' }))}
+                      className="text-xs text-slate-500 hover:text-brand-400 transition-colors">
+                      ← Change
+                    </button>
                   </div>
                 )}
-              </div>
 
-              {/* BNPL-specific fields */}
-              {isBNPLForm && (
-                <div className="space-y-4 pt-3 border-t border-slate-800">
-                  <div className="text-xs font-semibold text-purple-400 uppercase tracking-wide">Buy Now Pay Later Details</div>
+                {/* Scan zone (add mode only) */}
+                {!editAccount && (
+                  <div
+                    className={`mb-5 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all
+                      ${scanning ? 'border-brand-500/60 bg-brand-500/5' : 'border-slate-700 hover:border-brand-500/50 hover:bg-brand-500/5'}`}
+                    onClick={() => !scanning && fileInputRef.current?.click()}
+                    onPaste={handleModalPaste}
+                    tabIndex={0}
+                  >
+                    {scanning ? (
+                      <div className="flex items-center justify-center gap-2 text-brand-400">
+                        <Loader2 size={16} className="animate-spin" />
+                        <span className="text-sm font-medium">Scanning with AI…</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-center gap-2 text-slate-400 hover:text-brand-400 mb-1">
+                          <ScanLine size={16} />
+                          <span className="text-sm font-medium">Paste or click to scan a statement screenshot</span>
+                        </div>
+                        <p className="text-xs text-slate-600">Bank statement · Credit card · Any account summary</p>
+                      </>
+                    )}
+                  </div>
+                )}
 
+                {scanError && (
+                  <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mb-4">{scanError}</p>
+                )}
+
+                {/* Form fields */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-slate-400 font-medium mb-1.5 block">Institution Name *</label>
+                    <input value={form.institution_name} onChange={e => setForm(p => ({ ...p, institution_name: e.target.value }))}
+                      className="input-base" placeholder="Chase, Ally, Klarna…" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 font-medium mb-1.5 block">Nickname (optional)</label>
+                    <input value={form.nickname} onChange={e => setForm(p => ({ ...p, nickname: e.target.value }))}
+                      className="input-base" placeholder="My Checking" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 font-medium mb-1.5 block">Account Type</label>
+                    <select value={form.account_type} onChange={e => setForm(p => ({ ...p, account_type: e.target.value }))} className="input-base">
+                      {(editAccount
+                        ? ACCOUNT_TYPES
+                        : form.accountKind === 'asset' ? ASSET_TYPES : DEBT_TYPES_LABELS
+                      ).map(t => <option key={t}>{t}</option>)}
+                    </select>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Amount ($)</label>
-                      <input type="number" value={form.bnpl_payment_amount}
-                        onChange={e => setForm(p => ({ ...p, bnpl_payment_amount: e.target.value }))}
+                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">
+                        {isBNPLForm ? 'Remaining Balance ($)' : 'Balance ($)'}
+                      </label>
+                      <input type="number" value={form.current_balance} onChange={e => setForm(p => ({ ...p, current_balance: e.target.value }))}
                         className="input-base" placeholder="0.00" />
                     </div>
                     <div>
-                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Interval</label>
-                      <select value={form.bnpl_interval} onChange={e => setForm(p => ({ ...p, bnpl_interval: e.target.value }))} className="input-base">
-                        {INTERVALS.map(i => <option key={i}>{i}</option>)}
-                      </select>
+                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">APR / APY (%)</label>
+                      <input type="number" value={form.interest_rate} onChange={e => setForm(p => ({ ...p, interest_rate: e.target.value }))}
+                        className="input-base" placeholder="0.00" />
                     </div>
                   </div>
-
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">Next Due Date</label>
-                      <input type="date" value={form.bnpl_due_date}
-                        onChange={e => setForm(p => ({ ...p, bnpl_due_date: e.target.value }))}
-                        className="input-base" />
+                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">Last 4 Digits</label>
+                      <input maxLength={4} value={form.last_four} onChange={e => setForm(p => ({ ...p, last_four: e.target.value }))}
+                        className="input-base" placeholder="0000" />
                     </div>
-                    <div>
-                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payments Remaining</label>
-                      <input type="number" min={0} value={form.bnpl_payments_remaining}
-                        onChange={e => setForm(p => ({ ...p, bnpl_payments_remaining: e.target.value }))}
-                        className="input-base" placeholder="e.g. 4" />
-                    </div>
+                    {!isBNPLForm && (
+                      <div>
+                        <label className="text-xs text-slate-400 font-medium mb-1.5 block">Credit Limit ($)</label>
+                        <input type="number" value={form.credit_limit} onChange={e => setForm(p => ({ ...p, credit_limit: e.target.value }))}
+                          className="input-base" placeholder="Optional" />
+                      </div>
+                    )}
                   </div>
 
-                  <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl bg-slate-800/60 border border-slate-700/50">
-                    <input type="checkbox" checked={form.bnpl_auto_pay}
-                      onChange={e => setForm(p => ({ ...p, bnpl_auto_pay: e.target.checked }))}
-                      className="rounded accent-brand-500 w-4 h-4" />
-                    <div>
-                      <div className="text-sm font-medium text-slate-200">Auto-Pay Enabled</div>
-                      <div className="text-xs text-slate-500 mt-0.5">Payments are automatically deducted on the due date</div>
+                  {/* BNPL-specific fields */}
+                  {isBNPLForm && (
+                    <div className="space-y-4 pt-3 border-t border-slate-800">
+                      <div className="text-xs font-semibold text-purple-400 uppercase tracking-wide">Buy Now Pay Later Details</div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Amount ($)</label>
+                          <input type="number" value={form.bnpl_payment_amount}
+                            onChange={e => setForm(p => ({ ...p, bnpl_payment_amount: e.target.value }))}
+                            className="input-base" placeholder="0.00" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Interval</label>
+                          <select value={form.bnpl_interval} onChange={e => setForm(p => ({ ...p, bnpl_interval: e.target.value }))} className="input-base">
+                            {INTERVALS.map(i => <option key={i}>{i}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-slate-400 font-medium mb-1.5 block">Next Due Date</label>
+                          <input type="date" value={form.bnpl_due_date}
+                            onChange={e => setForm(p => ({ ...p, bnpl_due_date: e.target.value }))}
+                            className="input-base" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payments Remaining</label>
+                          <input type="number" min={0} value={form.bnpl_payments_remaining}
+                            onChange={e => setForm(p => ({ ...p, bnpl_payments_remaining: e.target.value }))}
+                            className="input-base" placeholder="e.g. 4" />
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl bg-slate-800/60 border border-slate-700/50">
+                        <input type="checkbox" checked={form.bnpl_auto_pay}
+                          onChange={e => setForm(p => ({ ...p, bnpl_auto_pay: e.target.checked }))}
+                          className="rounded accent-brand-500 w-4 h-4" />
+                        <div>
+                          <div className="text-sm font-medium text-slate-200">Auto-Pay Enabled</div>
+                          <div className="text-xs text-slate-500 mt-0.5">Payments are automatically deducted on the due date</div>
+                        </div>
+                        {form.bnpl_auto_pay && (
+                          <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">On</span>
+                        )}
+                      </label>
                     </div>
-                    {form.bnpl_auto_pay && (
-                      <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">On</span>
-                    )}
-                  </label>
+                  )}
+
+                  <div>
+                    <label className="text-xs text-slate-400 font-medium mb-1.5 block">Color</label>
+                    <div className="flex gap-2 flex-wrap">
+                      {COLORS.map(c => (
+                        <button key={c} onClick={() => setForm(p => ({ ...p, color: c }))}
+                          className="w-7 h-7 rounded-full transition-transform hover:scale-110 flex-shrink-0"
+                          style={{ backgroundColor: c, outline: form.color === c ? '2px solid white' : 'none', outlineOffset: 2 }} />
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              )}
 
-              <div>
-                <label className="text-xs text-slate-400 font-medium mb-1.5 block">Color</label>
-                <div className="flex gap-2 flex-wrap">
-                  {COLORS.map(c => (
-                    <button key={c} onClick={() => setForm(p => ({ ...p, color: c }))}
-                      className="w-7 h-7 rounded-full transition-transform hover:scale-110 flex-shrink-0"
-                      style={{ backgroundColor: c, outline: form.color === c ? '2px solid white' : 'none', outlineOffset: 2 }} />
-                  ))}
+                <div className="flex gap-3 mt-6">
+                  <button onClick={save} disabled={saving || !form.institution_name || scanning}
+                    className="btn-primary flex-1 justify-center flex items-center gap-2">
+                    {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editAccount ? 'Save Changes' : 'Save Account'}
+                  </button>
+                  <button onClick={() => { setShowModal(false); setEditAccount(null); setScanError(null) }} className="btn-ghost">Cancel</button>
                 </div>
-              </div>
-            </div>
 
-            <div className="flex gap-3 mt-6">
-              <button onClick={save} disabled={saving || !form.institution_name || scanning}
-                className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editAccount ? 'Save Changes' : 'Save Account'}
-              </button>
-              <button onClick={() => { setShowModal(false); setEditAccount(null) }} className="btn-ghost">Cancel</button>
-            </div>
-
-            {!editAccount && (
-              <button onClick={() => fileInputRef.current?.click()} disabled={scanning}
-                className="w-full mt-3 flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-brand-400 transition-colors py-1">
-                <Upload size={12} /> Browse for a different screenshot
-              </button>
+                {!editAccount && (
+                  <button onClick={() => fileInputRef.current?.click()} disabled={scanning}
+                    className="w-full mt-3 flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-brand-400 transition-colors py-1">
+                    <Upload size={12} /> Browse for a different screenshot
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
