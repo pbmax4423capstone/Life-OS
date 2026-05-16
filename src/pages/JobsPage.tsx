@@ -206,7 +206,7 @@ export default function JobsPage() {
                 {jobs.map(j => {
                   const st = STATUS_MAP[j.status] ?? STATUS_MAP.applied
                   return (
-                    <tr key={j.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0">
+                    <tr key={j.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0 cursor-pointer" onClick={() => openEditJob(j)}>
                       <td className="px-5 py-3 font-medium text-slate-200">{j.company_name}</td>
                       <td className="px-5 py-3 text-slate-300">{j.job_title}</td>
                       <td className="px-5 py-3">
@@ -218,10 +218,10 @@ export default function JobsPage() {
                       </td>
                       <td className="px-5 py-3 text-slate-400 text-xs">{j.location ? `${j.location}${j.remote_type ? ` (${j.remote_type})` : ''}` : '—'}</td>
                       <td className="px-5 py-3 text-slate-500 text-xs max-w-[160px] truncate">{j.notes ?? '—'}</td>
-                      <td className="px-5 py-3">
+                      <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
                         <div className="flex gap-1">
-                          <button onClick={() => openEditJob(j)} className="text-slate-600 hover:text-brand-400 p-1"><Pencil size={13} /></button>
-                          <button onClick={() => del(j.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                          <button onClick={e => { e.stopPropagation(); openEditJob(j) }} className="text-slate-600 hover:text-brand-400 p-1"><Pencil size={13} /></button>
+                          <button onClick={e => { e.stopPropagation(); del(j.id) }} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                         </div>
                       </td>
                     </tr>

@@ -189,7 +189,7 @@ export default function ProDevPage() {
         ) : (
           <div className="space-y-3">
             {certs.map(c => (
-              <div key={c.id} className="card p-5">
+              <div key={c.id} className="card p-5 cursor-pointer hover:border-slate-600 transition-colors" onClick={() => openEditCert(c)}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <div className="font-semibold text-slate-100">{c.name}</div>
@@ -199,8 +199,8 @@ export default function ProDevPage() {
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusBadge(c.status)}`}>
                       {c.status.replace('_', ' ')}
                     </span>
-                    <button onClick={() => openEditCert(c)} className="text-slate-600 hover:text-brand-400 p-1" title="Edit"><Pencil size={13} /></button>
-                    <button onClick={() => del(c.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1" title="Delete"><Trash2 size={14} /></button>
+                    <button onClick={e => { e.stopPropagation(); openEditCert(c) }} className="text-slate-600 hover:text-brand-400 p-1" title="Edit"><Pencil size={13} /></button>
+                    <button onClick={e => { e.stopPropagation(); del(c.id) }} className="text-slate-600 hover:text-red-400 transition-colors p-1" title="Delete"><Trash2 size={14} /></button>
                   </div>
                 </div>
                 <ProgressBar pct={c.progress_pct} color={statusColor(c.status)} />

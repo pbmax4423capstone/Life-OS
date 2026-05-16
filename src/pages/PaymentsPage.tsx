@@ -168,8 +168,8 @@ export default function PaymentsPage() {
     setSaving(true)
     const { data, error } = await supabase.from('scheduled_payments').update({
       from_account_id: form.from_account_id || null,
-      to_account_id: form.payee_account_id || null,
-      payee_name: form.payee_name,
+      to_account_id: form.payee_account_id || editPayment.to_account_id || null,
+      payee_name: form.payee_name || editPayment.payee_name,
       amount: parseFloat(form.amount),
       next_due_date: form.next_due_date || today(),
       frequency: form.frequency.toLowerCase(),
@@ -201,7 +201,10 @@ export default function PaymentsPage() {
     const src      = sourceLabel(p)
 
     return (
-      <tr className={`border-b border-slate-800/50 transition-colors last:border-0 ${dimmed ? 'opacity-50' : 'hover:bg-slate-800/30'}`}>
+      <tr
+        className={`border-b border-slate-800/50 transition-colors last:border-0 cursor-pointer ${dimmed ? 'opacity-50' : 'hover:bg-slate-800/30'}`}
+        onClick={() => openEdit(p)}
+      >
         <td className="px-5 py-3">
           <div className="font-medium text-slate-200">{p.payee_name ?? 'Payment'}</div>
           {src && <div className="text-xs text-brand-400 mt-0.5 flex items-center gap-1"><CreditCard size={10} /> {src}</div>}
@@ -238,18 +241,18 @@ export default function PaymentsPage() {
         </td>
 
         {/* Actions */}
-        <td className="px-5 py-3">
+        <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
           <div className="flex items-center gap-1">
             {!datePaid && (
               <button
-                onClick={() => { setMarkingPaid(p); setPaidDate(today()) }}
+                onClick={e => { e.stopPropagation(); setMarkingPaid(p); setPaidDate(today()) }}
                 className="text-xs px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 transition-colors flex items-center gap-1"
                 title="Mark as Paid"
               >
                 <CheckCircle2 size={12} /> Paid
               </button>
             )}
-            <button onClick={() => openEdit(p)} className="text-slate-600 hover:text-brand-400 transition-colors p-1" title="Edit">
+            <button onClick={e => { e.stopPropagation(); openEdit(p) }} className="text-slate-600 hover:text-brand-400 transition-colors p-1" title="Edit">
               <Pencil size={13} />
             </button>
             <button onClick={() => del(p.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1" title="Delete">
@@ -416,7 +419,7 @@ export default function PaymentsPage() {
               </label>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={add} disabled={saving || !form.payee_account_id || !form.amount} className="btn-primary flex-1 justify-center flex items-center gap-2">
+              <button onClick={add} disabled={saving || (!form.payee_account_id && !editPayment) || !form.amount} className="btn-primary flex-1 justify-center flex items-center gap-2">
                 {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editPayment ? 'Save Changes' : 'Save Payment'}
               </button>
               <button onClick={() => { setShowAdd(false); setEditPayment(null) }} className="btn-ghost">Cancel</button>

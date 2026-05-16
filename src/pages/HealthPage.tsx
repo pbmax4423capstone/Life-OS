@@ -175,7 +175,7 @@ export default function HealthPage() {
               </thead>
               <tbody>
                 {appts.map(a => (
-                  <tr key={a.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0">
+                  <tr key={a.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0 cursor-pointer" onClick={() => openEditAppt(a)}>
                     <td className="px-5 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.member_id === 'Patrick' ? 'bg-indigo-500/15 text-indigo-400 border-indigo-500/25' : 'bg-purple-500/15 text-purple-400 border-purple-500/25'}`}>
                         {a.member_id ?? 'Self'}
@@ -189,7 +189,7 @@ export default function HealthPage() {
                       <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusBadge(a.status)}`}>{a.status}</span>
                     </td>
                       <td className="px-5 py-3">
-                        <div className="flex gap-1">
+                        <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                           <button onClick={() => openEditAppt(a)} className="text-slate-600 hover:text-brand-400 transition-colors p-1"><Pencil size={13} /></button>
                           <button onClick={() => delAppt(a.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                         </div>
