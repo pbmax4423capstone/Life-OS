@@ -115,8 +115,10 @@ export default function AccountsPage() {
     return true
   })
 
-  const totalAssets = accounts.filter(a => a.current_balance > 0).reduce((s, a) => s + a.current_balance, 0)
-  const totalDebt = accounts.filter(a => a.current_balance < 0).reduce((s, a) => s + Math.abs(a.current_balance), 0)
+  const DEBT_TYPES = ['credit_card', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan']
+  const ASSET_TYPES = ['checking', 'savings', 'cd', 'investment', 'retirement']
+  const totalAssets = accounts.filter(a => ASSET_TYPES.includes(a.account_type)).reduce((s, a) => s + a.current_balance, 0)
+  const totalDebt = accounts.filter(a => DEBT_TYPES.includes(a.account_type)).reduce((s, a) => s + a.current_balance, 0)
   const netWorth = totalAssets - totalDebt
 
   const openEdit = (a: FinancialAccount) => {
