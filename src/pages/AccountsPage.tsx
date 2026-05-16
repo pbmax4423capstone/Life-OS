@@ -286,12 +286,12 @@ export default function AccountsPage() {
                   <td className="px-5 py-3 text-slate-300">{a.interest_rate ? `${a.interest_rate}%` : '—'}</td>
                   <td className="px-5 py-3 text-slate-300">{a.rewards_balance > 0 ? `${a.rewards_balance.toLocaleString()} pts` : '—'}</td>
                   <td className="px-5 py-3">
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-3">
                       <button onClick={() => openEdit(a)} className="text-slate-600 hover:text-brand-400 transition-colors p-1">
-                        <Pencil size={14} />
+                        <Pencil size={17} />
                       </button>
                       <button onClick={() => del(a.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
-                        <Trash2 size={14} />
+                        <Trash2 size={17} />
                       </button>
                     </div>
                   </td>
