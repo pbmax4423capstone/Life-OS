@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { TrendingUp, TrendingDown, Wallet, PiggyBank, BarChart2, CalendarDays, Pencil, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
@@ -28,8 +28,9 @@ interface RetirementLoan {
 // ── Payday settings (localStorage) ───────────────────────────
 interface PaydaySettings {
   frequency: 'weekly' | 'biweekly' | 'semi-monthly' | 'monthly'
-  next_payday: string    // YYYY-MM-DD anchor date
-  paycheck_amount: string
+  next_payday: string        // anchor / calibration date
+  paycheck_amount?: string   // legacy field kept for compat
+  debt_budget?: string       // Debt Payment Budget
 }
 const FREQ_DAYS: Record<string, number> = {
   weekly: 7, biweekly: 14, 'semi-monthly': 15, monthly: 30,
@@ -57,27 +58,68 @@ function nextPaydayFrom(anchor: string, freq: string): string {
   return d.toISOString().split('T')[0]
 }
 
+/** Step a payday date forward (positive offset) or backward (negative) */
+function shiftPayday(date: string, freq: string, offset: number): string {
+  if (offset === 0) return date
+  const d = new Date(date + 'T00:00:00')
+  const step = FREQ_DAYS[freq] ?? 14
+  const sign = offset > 0 ? 1 : -1
+  for (let i = 0; i < Math.abs(offset); i++) {
+    if (freq === 'monthly') d.setMonth(d.getMonth() + sign)
+    else d.setDate(d.getDate() + sign * step)
+  }
+  return d.toISOString().split('T')[0]
+}
+
 // ── Payday Planner Card ───────────────────────────────────────
 function PaydayPlanner({
-  settings, onChange, billsBeforePayday, checkingAfterBills,
+  settings, onChange, payments, checkingBalance,
 }: {
   settings: PaydaySettings | null
   onChange: (s: PaydaySettings) => void
-  billsBeforePayday: ScheduledPayment[]
-  checkingAfterBills: number
+  payments: ScheduledPayment[]
+  checkingBalance: number
 }) {
+  // Only show edit form on first setup (no settings); otherwise show saved view
   const [editing, setEditing] = useState(!settings)
+  const [viewOffset, setViewOffset] = useState(0)
   const [form, setForm] = useState<PaydaySettings>(settings ?? {
-    frequency: 'biweekly', next_payday: new Date().toISOString().split('T')[0], paycheck_amount: '',
+    frequency: 'biweekly',
+    next_payday: new Date().toISOString().split('T')[0],
+    debt_budget: '',
   })
+
+  // When settings arrive from Supabase after initial render, close the form
+  const prevSettingsRef = useRef<PaydaySettings | null>(null)
+  useEffect(() => {
+    if (settings && !prevSettingsRef.current) {
+      setEditing(false)
+      setForm(settings)
+    }
+    prevSettingsRef.current = settings
+  }, [settings])
 
   const save = () => {
     onChange(form)
     setEditing(false)
+    setViewOffset(0)
   }
 
-  const nextPayday = settings ? nextPaydayFrom(settings.next_payday, settings.frequency) : null
-  const totalBills = billsBeforePayday.reduce((s, p) => s + p.amount, 0)
+  // Compute the payday for the current view offset
+  const basePayday   = settings ? nextPaydayFrom(settings.next_payday, settings.frequency) : null
+  const viewPayday   = basePayday && settings ? shiftPayday(basePayday, settings.frequency, viewOffset) : basePayday
+  const prevPayday   = viewPayday && settings ? shiftPayday(viewPayday, settings.frequency, -1) : null
+  const isCurrentPeriod = viewOffset === 0
+
+  // Bills due in this view period (between previous payday and view payday)
+  const billsThisPeriod = viewPayday && prevPayday
+    ? payments.filter(p => p.next_due_date > prevPayday! && p.next_due_date <= viewPayday)
+    : viewPayday ? payments.filter(p => p.next_due_date <= viewPayday) : []
+
+  const totalBills = billsThisPeriod.reduce((s, p) => s + p.amount, 0)
+  const budget = parseFloat(settings?.debt_budget ?? settings?.paycheck_amount ?? '0') || 0
+  const budgetRemaining = budget > 0 ? budget - totalBills : null
+  const checkingAfterBills = checkingBalance - totalBills
 
   return (
     <div className="card p-5">
@@ -90,7 +132,8 @@ function PaydayPlanner({
             <h2 className="text-base font-semibold text-slate-100">Payday Planner</h2>
             {settings && !editing && (
               <p className="text-xs text-slate-500">
-                {FREQ_LABELS[settings.frequency]} · Next payday: <span className="text-emerald-400 font-medium">{nextPayday}</span>
+                <span className="text-brand-400 font-medium">{FREQ_LABELS[settings.frequency]}</span>
+                {budget > 0 && <> · Budget: <span className="text-emerald-400 font-medium">{fmtDec(budget)}/period</span></>}
               </p>
             )}
           </div>
@@ -104,28 +147,42 @@ function PaydayPlanner({
 
       {editing ? (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-slate-400 font-medium mb-1.5 block">Pay Frequency</label>
-              <select value={form.frequency} onChange={e => setForm(p => ({ ...p, frequency: e.target.value as PaydaySettings['frequency'] }))} className="input-base">
-                <option value="weekly">Weekly</option>
-                <option value="biweekly">Biweekly (every 2 weeks)</option>
-                <option value="semi-monthly">Semi-Monthly (1st & 15th)</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-slate-400 font-medium mb-1.5 block">Next / Most Recent Payday</label>
-              <input type="date" value={form.next_payday}
-                onChange={e => setForm(p => ({ ...p, next_payday: e.target.value }))} className="input-base" />
-            </div>
-          </div>
+          {/* Frequency */}
           <div>
-            <label className="text-xs text-slate-400 font-medium mb-1.5 block">Paycheck Amount (optional)</label>
-            <input type="number" value={form.paycheck_amount}
-              onChange={e => setForm(p => ({ ...p, paycheck_amount: e.target.value }))}
-              className="input-base" placeholder="e.g. 2440" />
+            <label className="text-xs text-slate-400 font-medium mb-1.5 block">Pay Frequency</label>
+            <select value={form.frequency}
+              onChange={e => setForm(p => ({ ...p, frequency: e.target.value as PaydaySettings['frequency'] }))}
+              className="input-base">
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Biweekly (every 2 weeks)</option>
+              <option value="semi-monthly">Semi-Monthly (1st & 15th)</option>
+              <option value="monthly">Monthly</option>
+            </select>
           </div>
+
+          {/* Debt Payment Budget */}
+          <div>
+            <label className="text-xs text-slate-400 font-medium mb-1.5 block">
+              Debt Payment Budget ($)
+              <span className="text-slate-600 font-normal ml-1">— how much of each paycheck goes to debt</span>
+            </label>
+            <input type="number" value={form.debt_budget ?? form.paycheck_amount ?? ''}
+              onChange={e => setForm(p => ({ ...p, debt_budget: e.target.value, paycheck_amount: e.target.value }))}
+              className="input-base" placeholder="e.g. 500" />
+          </div>
+
+          {/* Calibration date — kept for accuracy but labeled clearly */}
+          <div>
+            <label className="text-xs text-slate-400 font-medium mb-1.5 block">
+              Most Recent Payday
+              <span className="text-slate-600 font-normal ml-1">— set once to calibrate your schedule</span>
+            </label>
+            <input type="date" value={form.next_payday}
+              onChange={e => setForm(p => ({ ...p, next_payday: e.target.value }))}
+              className="input-base" />
+            <p className="text-xs text-slate-600 mt-1">After saving, use the ← → buttons to navigate between pay periods.</p>
+          </div>
+
           <div className="flex gap-3">
             <button onClick={save} className="btn-primary flex-1 justify-center">Save</button>
             {settings && <button onClick={() => setEditing(false)} className="btn-ghost">Cancel</button>}
@@ -133,37 +190,60 @@ function PaydayPlanner({
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Summary row */}
+          {/* Pay period navigator */}
+          <div className="flex items-center justify-between bg-slate-800/60 rounded-xl px-4 py-3">
+            <button onClick={() => setViewOffset(v => v - 1)}
+              className="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-700 transition-colors">
+              ← Prev
+            </button>
+            <div className="text-center">
+              <div className="text-xs text-slate-500 mb-0.5">
+                {isCurrentPeriod ? 'Current Pay Period' : viewOffset > 0 ? `${viewOffset} period${viewOffset > 1 ? 's' : ''} ahead` : `${Math.abs(viewOffset)} period${Math.abs(viewOffset) > 1 ? 's' : ''} back`}
+              </div>
+              <div className="text-base font-bold text-emerald-400">{viewPayday}</div>
+              {isCurrentPeriod && <div className="text-xs text-slate-600 mt-0.5">next payday</div>}
+            </div>
+            <button onClick={() => setViewOffset(v => v + 1)}
+              className="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-700 transition-colors">
+              Next →
+            </button>
+          </div>
+
+          {/* Budget summary row */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-slate-800/60 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500 mb-1">Next Payday</div>
-              <div className="text-sm font-bold text-emerald-400">{nextPayday}</div>
+              <div className="text-xs text-slate-500 mb-1">Debt Budget</div>
+              <div className={`text-sm font-bold ${budget > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                {budget > 0 ? fmtDec(budget) : 'Not set'}
+              </div>
             </div>
             <div className="bg-slate-800/60 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500 mb-1">Bills Before Then</div>
+              <div className="text-xs text-slate-500 mb-1">Bills This Period</div>
               <div className="text-sm font-bold text-red-400">{fmtDec(totalBills)}</div>
             </div>
             <div className="bg-slate-800/60 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500 mb-1">Checking After Bills</div>
-              <div className={`text-sm font-bold ${checkingAfterBills >= 0 ? 'text-brand-400' : 'text-red-400'}`}>
-                {fmtDec(checkingAfterBills)}
+              <div className="text-xs text-slate-500 mb-1">
+                {budgetRemaining != null ? 'Budget Remaining' : 'Checking After Bills'}
+              </div>
+              <div className={`text-sm font-bold ${(budgetRemaining ?? checkingAfterBills) >= 0 ? 'text-brand-400' : 'text-red-400'}`}>
+                {fmtDec(budgetRemaining ?? checkingAfterBills)}
               </div>
             </div>
           </div>
 
-          {/* Bills due before payday */}
-          {billsBeforePayday.length === 0 ? (
+          {/* Bills list */}
+          {billsThisPeriod.length === 0 ? (
             <div className="flex items-center gap-2 text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
               <CheckCircle2 size={16} />
-              No scheduled payments due before your next payday — you're all clear!
+              No scheduled payments due before {viewPayday} — you're all clear!
             </div>
           ) : (
             <div>
               <div className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2">
-                Payments due before {nextPayday}
+                Payments due by {viewPayday}
               </div>
               <div className="space-y-1.5">
-                {billsBeforePayday.map(p => (
+                {billsThisPeriod.map(p => (
                   <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/40 border border-slate-700/30">
                     <div className="flex items-center gap-3">
                       <div className={`w-1.5 h-1.5 rounded-full ${p.auto_pay ? 'bg-emerald-400' : 'bg-amber-400'}`} />
@@ -179,13 +259,16 @@ function PaydayPlanner({
             </div>
           )}
 
-          {settings?.paycheck_amount && parseFloat(settings.paycheck_amount) > 0 && (
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-              <span className="text-xs text-slate-500">Projected balance after payday + bills</span>
-              <span className={`text-sm font-bold ${checkingAfterBills + parseFloat(settings.paycheck_amount) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {fmtDec(checkingAfterBills + parseFloat(settings.paycheck_amount))}
-              </span>
+          {budgetRemaining != null && budgetRemaining < 0 && (
+            <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
+              ⚠ Bills exceed your debt budget by {fmtDec(Math.abs(budgetRemaining))} this period.
             </div>
+          )}
+
+          {settings?.debt_budget == null && settings?.paycheck_amount == null && (
+            <button onClick={() => setEditing(true)} className="text-xs text-brand-400 hover:underline">
+              + Set a Debt Payment Budget to track your remaining balance
+            </button>
           )}
         </div>
       )}
@@ -237,9 +320,17 @@ export default function DashboardPage() {
     load()
   }, [user])
 
-  const handlePaydayChange = (s: PaydaySettings) => {
+  const handlePaydayChange = async (s: PaydaySettings) => {
     setPaydaySettings(s)
     savePayday(s)
+    // Persist to Supabase profile so it survives URL/device changes
+    if (user && profile) {
+      try {
+        await supabase.from('profiles').update({
+          preferences: { ...(profile.preferences as Record<string, unknown> ?? {}), payday_settings: s },
+        }).eq('id', user.id)
+      } catch { /* graceful — localStorage is the backup */ }
+    }
   }
 
   // ── Classify accounts ─────────────────────────────────────────
@@ -530,8 +621,8 @@ export default function DashboardPage() {
       <PaydayPlanner
         settings={paydaySettings}
         onChange={handlePaydayChange}
-        billsBeforePayday={billsBeforePayday}
-        checkingAfterBills={checkingAfterBills}
+        payments={payments}
+        checkingBalance={checkingBalance}
       />
 
       {/* Accounts list */}
