@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload, Pencil, TrendingUp, TrendingDown, BarChart2, DollarSign, CheckCircle2 } from 'lucide-react'
+import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload, Pencil, TrendingUp, TrendingDown, BarChart2, DollarSign, CheckCircle2, ChevronDown, ChevronUp, CalendarClock } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
@@ -129,6 +129,30 @@ function parseMeta(memo: string | null): Record<string, unknown> {
   try { return JSON.parse(memo) } catch { return {} }
 }
 
+// ── Payday helpers (mirror DashboardPage) ─────────────────────
+function loadPaydaySettings() {
+  try { return JSON.parse(localStorage.getItem('life_os_payday') ?? 'null') as { frequency: string; next_payday: string } | null } catch { return null }
+}
+
+function computeNextPayday(anchor: string, freq: string): string {
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const d = new Date(anchor + 'T00:00:00')
+  const step: Record<string, number> = { weekly: 7, biweekly: 14, 'semi-monthly': 15, monthly: 30 }
+  while (d < today) {
+    if (freq === 'monthly') d.setMonth(d.getMonth() + 1)
+    else d.setDate(d.getDate() + (step[freq] ?? 14))
+  }
+  return d.toISOString().split('T')[0]
+}
+
+// ── Payment budget (localStorage) ────────────────────────────
+function loadBudget(): string {
+  try { return JSON.parse(localStorage.getItem('life_os_pay_budget') ?? 'null')?.amount ?? '' } catch { return '' }
+}
+function saveBudgetAmount(amount: string) {
+  localStorage.setItem('life_os_pay_budget', JSON.stringify({ amount }))
+}
+
 const BLANK_FORM = {
   accountKind: '' as AccountKind,
   nickname: '', account_type: 'Checking', institution_name: '',
@@ -164,6 +188,11 @@ export default function AccountsPage() {
   const [payingNow, setPayingNow] = useState(false)
   const [payNowError, setPayNowError] = useState<string | null>(null)
 
+  // Payday + budget state
+  const [paydaySettings] = useState(loadPaydaySettings)
+  const [budgetAmount, setBudgetAmountState] = useState(loadBudget)
+  const [showDueExpanded, setShowDueExpanded] = useState(false)
+
   useEffect(() => {
     if (!user) { setLoading(false); return }
     Promise.all([
@@ -195,9 +224,38 @@ export default function AccountsPage() {
     return true
   })
 
-  const totalAssets = accounts.filter(a => a.current_balance > 0).reduce((s, a) => s + a.current_balance, 0)
-  const totalDebt = accounts.filter(a => a.current_balance < 0).reduce((s, a) => s + Math.abs(a.current_balance), 0)
-  const netWorth = totalAssets - totalDebt
+  // ── Stat card calculations (same classifier as Dashboard) ──
+  const isDebtAcc = (a: FinancialAccount) => DEBT_TYPES.includes(getDisplayType(a)) || a.current_balance < 0
+  const debtAccList  = accounts.filter(isDebtAcc)
+  const assetAccList = accounts.filter(a => !isDebtAcc(a) && a.current_balance > 0)
+  const totalAssets = assetAccList.reduce((s, a) => s + a.current_balance, 0)
+  const totalDebt   = debtAccList.reduce((s, a) => s + Math.abs(a.current_balance), 0)
+  const netWorth    = totalAssets - totalDebt
+
+  // ── Payments due before next payday ───────────────────────
+  const nextPayday = paydaySettings ? computeNextPayday(paydaySettings.next_payday, paydaySettings.frequency) : null
+
+  const dueItems = nextPayday ? accounts.filter(isDebtAcc).flatMap(a => {
+    const dt      = getDisplayType(a)
+    const extras  = bnplData[a.id]
+    const sched   = paymentsByAccount[a.id]
+    let dueDate: string | undefined
+    let amount = 0
+    if (dt === 'buy_now_pay_later' && extras?.due_date) {
+      dueDate = extras.due_date
+      amount  = parseFloat(extras.payment_amount) || 0
+    } else if (sched) {
+      dueDate = sched.next_due_date
+      amount  = sched.amount
+    }
+    if (dueDate && dueDate <= nextPayday! && amount > 0) {
+      return [{ account: a, dueDate, amount, extras, sched }]
+    }
+    return []
+  }).sort((a, b) => a.dueDate.localeCompare(b.dueDate)) : []
+
+  const totalDue        = dueItems.reduce((s, i) => s + i.amount, 0)
+  const budgetRemaining = parseFloat(budgetAmount) > 0 ? parseFloat(budgetAmount) - totalDue : null
 
   // ── Map each debt account → its next scheduled payment ───────
   const paymentsByAccount: Record<string, ScheduledPayment> = {}
@@ -430,16 +488,22 @@ export default function AccountsPage() {
     if (error) { setPayNowError(error.message); setPayingNow(false); return }
     if (data) setAccounts(p => p.map(a => a.id === data.id ? data : a))
 
-    // Update BNPL extras: decrement payments_remaining, record last_payment_date
+    // Update BNPL extras: decrement payments_remaining, record last_payment_date, advance due_date
     const dt = getDisplayType(payNowAccount)
     if (dt === 'buy_now_pay_later') {
       const extras = bnplData[payNowAccount.id]
       if (extras) {
         const remaining = parseInt(extras.payments_remaining) || 0
+        const newRemaining = Math.max(0, remaining - 1)
+        // Advance due_date so this account leaves the "due before payday" list
+        const newDueDate = newRemaining > 0
+          ? advanceDueDate(extras.due_date, extras.payment_interval)
+          : extras.due_date
         const updated: BNPLExtras = {
           ...extras,
-          payments_remaining: String(Math.max(0, remaining - 1)),
+          payments_remaining: String(newRemaining),
           last_payment_date: payNowDate,
+          due_date: newDueDate,
         }
         const updatedAll = { ...bnplData, [payNowAccount.id]: updated }
         setBnplData(updatedAll)
@@ -515,6 +579,86 @@ export default function AccountsPage() {
         ))}
       </div>
 
+      {/* ── Payments Due This Pay Period ── */}
+      {nextPayday && (
+        <div className={`card p-5 border-2 transition-colors ${dueItems.length > 0 ? 'border-amber-500/30 bg-amber-500/5' : 'border-slate-700/50'}`}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg ${dueItems.length > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-500'}`}>
+                <CalendarClock size={16} />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-100">
+                  Payments Due Before Payday
+                  {dueItems.length > 0 && (
+                    <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">{dueItems.length} due</span>
+                  )}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">Next payday: <span className="text-emerald-400 font-medium">{nextPayday}</span></p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-500 whitespace-nowrap">Payment Budget</label>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">$</span>
+                  <input type="number" value={budgetAmount}
+                    onChange={e => { setBudgetAmountState(e.target.value); saveBudgetAmount(e.target.value) }}
+                    className="input-base pl-6 py-1.5 text-sm w-28" placeholder="0" />
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-bold text-amber-400">{fmt(totalDue)} due</div>
+                {budgetRemaining != null && (
+                  <div className={`text-xs font-semibold ${budgetRemaining >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {fmt(Math.abs(budgetRemaining))} {budgetRemaining >= 0 ? 'remaining' : 'over budget'}
+                  </div>
+                )}
+              </div>
+              {dueItems.length > 0 && (
+                <button onClick={() => setShowDueExpanded(v => !v)}
+                  className="btn-ghost text-xs py-1 px-3 flex items-center gap-1">
+                  {showDueExpanded ? <><ChevronUp size={13} /> Hide</> : <><ChevronDown size={13} /> Details</>}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {showDueExpanded && (
+            <div className="mt-4 space-y-2">
+              {dueItems.map(item => (
+                <div key={item.account.id}
+                  className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-900/60 border border-slate-800/60 hover:border-slate-700 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-7 rounded-full flex-shrink-0" style={{ backgroundColor: item.account.color }} />
+                    <div>
+                      <div className="text-sm font-medium text-slate-200">{item.account.nickname ?? item.account.institution_name}</div>
+                      <div className="text-xs text-slate-500">
+                        Due {item.dueDate}
+                        {item.extras?.last_payment_date && <span className="text-emerald-400 ml-2">· Last paid {item.extras.last_payment_date}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-amber-400">{fmt(item.amount)}</span>
+                    <button onClick={e => openPayNow(item.account, e)}
+                      className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-brand-500/15 hover:bg-brand-500/25 text-brand-400 border border-brand-500/20 transition-colors">
+                      <DollarSign size={11} /> Pay Now
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {dueItems.length === 0 && (
+            <div className="flex items-center gap-2 text-sm text-emerald-400 mt-3">
+              <CheckCircle2 size={15} /> No payments due before {nextPayday} — you're all clear!
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex bg-slate-900 rounded-lg p-1 gap-1 w-fit">
         {tabs.map(t => (
           <button key={t} onClick={() => setTab(t)}
@@ -557,9 +701,11 @@ export default function AccountsPage() {
                 const isDebt = DEBT_TYPES.includes(dt)
                 const isBNPL = dt === 'buy_now_pay_later'
 
+                const isPaidOff = isBNPL && (parseInt(bnplExtras?.payments_remaining ?? '1') <= 0)
+
                 return (
                   <tr key={a.id}
-                    className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors last:border-0 cursor-pointer"
+                    className={`border-b transition-colors last:border-0 cursor-pointer ${isPaidOff ? 'border-emerald-800/40 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-800/50 hover:bg-slate-800/30'}`}
                     onClick={() => openEdit(a)}
                   >
                     <td className="px-5 py-3">
@@ -631,18 +777,24 @@ export default function AccountsPage() {
                     <td className="px-5 py-3">
                       {isBNPL ? (
                         <div className="space-y-0.5">
-                          {bnplExtras?.payments_remaining && (
-                            <div className="text-xs font-semibold text-purple-300">
-                              {bnplExtras.payments_remaining} payments left
-                            </div>
-                          )}
-                          {bnplExtras?.last_payment_date && (
-                            <div className="text-xs text-slate-500">
-                              Last paid: {bnplExtras.last_payment_date}
-                            </div>
-                          )}
-                          {bnplExtras?.auto_pay && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Auto-Pay</span>
+                          {isPaidOff ? (
+                            <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold">
+                              ✓ Paid off
+                            </span>
+                          ) : (
+                            <>
+                              {bnplExtras?.payments_remaining && (
+                                <div className="text-xs font-semibold text-purple-300">
+                                  {bnplExtras.payments_remaining} payments left
+                                </div>
+                              )}
+                              {bnplExtras?.last_payment_date && (
+                                <div className="text-xs text-slate-500">Last paid: {bnplExtras.last_payment_date}</div>
+                              )}
+                              {bnplExtras?.auto_pay && (
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Auto-Pay</span>
+                              )}
+                            </>
                           )}
                         </div>
                       ) : (
