@@ -111,15 +111,25 @@ export default function DashboardPage() {
         <div className="card p-5">
           <h2 className="text-base font-semibold text-slate-100 mb-4">Upcoming Payments</h2>
           <div className="space-y-2">
-            {payments.map(p => (
-              <div key={p.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
-                <div>
-                  <div className="text-sm text-slate-200">{p.payee_name ?? 'Payment'}</div>
-                  <div className="text-xs text-slate-500">Due {p.next_due_date}</div>
+            {payments.map(p => {
+              const fromAcct = accounts.find(a => a.id === p.from_account_id)
+              return (
+                <div key={p.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
+                  <div>
+                    <div className="text-sm text-slate-200">{p.payee_name ?? 'Payment'}</div>
+                    <div className="text-xs text-slate-500">
+                      Due {p.next_due_date}
+                      {fromAcct && (
+                        <span className="ml-1.5">
+                          · from <span className="text-slate-400">{fromAcct.nickname ?? fromAcct.institution_name}{fromAcct.last_four ? ` ···${fromAcct.last_four}` : ''}</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-sm font-semibold text-slate-200">{fmtDec(p.amount)}</div>
                 </div>
-                <div className="text-sm font-semibold text-slate-200">{fmtDec(p.amount)}</div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

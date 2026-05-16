@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
-import { Plus, Trash2, Calendar, Loader2 } from 'lucide-react'
-import { supabase, type ScheduledPayment } from '@/lib/supabase'
+import { useState, useEffect, useMemo } from 'react'
+import { Plus, Trash2, Calendar, Loader2, Building2 } from 'lucide-react'
+import { supabase, type ScheduledPayment, type FinancialAccount } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
 const fmt = (n: number) =>
@@ -9,26 +9,62 @@ const fmt = (n: number) =>
 const FREQUENCIES = ['Once', 'Weekly', 'Biweekly', 'Monthly', 'Quarterly', 'Annually']
 const CATEGORIES = ['Credit Card', 'Mortgage', 'Auto Loan', 'Student Loan', 'Utility', 'Insurance', 'Subscription', 'Other']
 
+const FUNDING_TYPES = ['checking', 'savings']
+const PAYEE_TYPES = ['credit_card', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan']
+
+function accountLabel(a: FinancialAccount) {
+  const name = a.nickname ?? a.institution_name
+  return a.last_four ? `${name} ···${a.last_four}` : name
+}
+
 export default function PaymentsPage() {
   const { user } = useAuthStore()
   const [payments, setPayments] = useState<ScheduledPayment[]>([])
+  const [accounts, setAccounts] = useState<FinancialAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     payee_name: '', amount: '', next_due_date: '', from_account_id: '',
-    frequency: 'Monthly', memo: '', auto_pay: false,
+    to_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false,
   })
+
+  const accountMap = useMemo(
+    () => new Map(accounts.map(a => [a.id, a])),
+    [accounts],
+  )
+
+  const fundingAccounts = useMemo(
+    () => accounts.filter(a => FUNDING_TYPES.includes(a.account_type)),
+    [accounts],
+  )
+
+  const payeeAccounts = useMemo(
+    () => accounts.filter(a => PAYEE_TYPES.includes(a.account_type)),
+    [accounts],
+  )
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
-    supabase.from('scheduled_payments').select('*')
-      .eq('owner_id', user.id).is('deleted_at', null).order('next_due_date')
-      .then(({ data }) => { setPayments(data ?? []); setLoading(false) })
+    Promise.all([
+      supabase.from('scheduled_payments').select('*')
+        .eq('owner_id', user.id).is('deleted_at', null).order('next_due_date'),
+      supabase.from('financial_accounts').select('*')
+        .eq('owner_id', user.id).is('deleted_at', null).order('sort_order'),
+    ]).then(([{ data: pmts }, { data: accs }]) => {
+      setPayments(pmts ?? [])
+      setAccounts(accs ?? [])
+      setLoading(false)
+    })
   }, [user])
 
   const total = payments.reduce((s, p) => s + p.amount, 0)
   const nextDue = payments.sort((a, b) => a.next_due_date.localeCompare(b.next_due_date))[0]
+
+  const resetForm = () => setForm({
+    payee_name: '', amount: '', next_due_date: '', from_account_id: '',
+    to_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false,
+  })
 
   const add = async () => {
     if (!user || !form.payee_name || !form.amount) return
@@ -36,6 +72,7 @@ export default function PaymentsPage() {
     const { data, error } = await supabase.from('scheduled_payments').insert({
       owner_id: user.id,
       from_account_id: form.from_account_id || user.id,
+      to_account_id: form.to_account_id || null,
       payee_name: form.payee_name,
       amount: parseFloat(form.amount),
       next_due_date: form.next_due_date || new Date().toISOString().split('T')[0],
@@ -47,7 +84,7 @@ export default function PaymentsPage() {
     if (!error && data) setPayments(p => [...p, data])
     setSaving(false)
     setShowAdd(false)
-    setForm({ payee_name: '', amount: '', next_due_date: '', from_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false })
+    resetForm()
   }
 
   const del = async (id: string) => {
@@ -105,36 +142,52 @@ export default function PaymentsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-800">
-                {['Payee', 'Amount', 'Due Date', 'Frequency', 'Auto-Pay', 'Status', ''].map(h => (
+                {['Payee', 'Amount', 'Pay From', 'Due Date', 'Frequency', 'Auto-Pay', 'Status', ''].map(h => (
                   <th key={h} className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400 px-5 py-3">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {payments.map(p => (
-                <tr key={p.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors last:border-0">
-                  <td className="px-5 py-3">
-                    <div className="font-medium text-slate-200">{p.payee_name ?? 'Payment'}</div>
-                    {p.memo && <div className="text-xs text-slate-500">{p.memo}</div>}
-                  </td>
-                  <td className="px-5 py-3 font-semibold text-slate-200">{fmt(p.amount)}</td>
-                  <td className="px-5 py-3 text-slate-300">{p.next_due_date}</td>
-                  <td className="px-5 py-3 text-slate-300 capitalize">{p.frequency}</td>
-                  <td className="px-5 py-3">
-                    {p.auto_pay
-                      ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">On</span>
-                      : <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/50">Off</span>}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${p.status === 'active' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' : 'bg-amber-500/15 text-amber-400 border-amber-500/25'}`}>
-                      {p.status}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <button onClick={() => del(p.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
-                  </td>
-                </tr>
-              ))}
+              {payments.map(p => {
+                const fromAcct = accountMap.get(p.from_account_id)
+                return (
+                  <tr key={p.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors last:border-0">
+                    <td className="px-5 py-3">
+                      <div className="font-medium text-slate-200">{p.payee_name ?? 'Payment'}</div>
+                      {p.memo && <div className="text-xs text-slate-500">{p.memo}</div>}
+                    </td>
+                    <td className="px-5 py-3 font-semibold text-slate-200">{fmt(p.amount)}</td>
+                    <td className="px-5 py-3">
+                      {fromAcct ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-1.5 h-5 rounded-full flex-shrink-0" style={{ backgroundColor: fromAcct.color }} />
+                          <div>
+                            <div className="text-sm text-slate-200">{fromAcct.nickname ?? fromAcct.institution_name}</div>
+                            {fromAcct.last_four && <div className="text-xs text-slate-500">···{fromAcct.last_four}</div>}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">Not set</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-slate-300">{p.next_due_date}</td>
+                    <td className="px-5 py-3 text-slate-300 capitalize">{p.frequency}</td>
+                    <td className="px-5 py-3">
+                      {p.auto_pay
+                        ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">On</span>
+                        : <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/50">Off</span>}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${p.status === 'active' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' : 'bg-amber-500/15 text-amber-400 border-amber-500/25'}`}>
+                        {p.status}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <button onClick={() => del(p.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -162,6 +215,45 @@ export default function PaymentsPage() {
                     className="input-base" />
                 </div>
               </div>
+
+              <div>
+                <label className="text-xs text-slate-400 font-medium mb-1.5 block">
+                  <span className="flex items-center gap-1.5"><Building2 size={12} /> Pay From (Funding Account)</span>
+                </label>
+                {fundingAccounts.length > 0 ? (
+                  <select
+                    value={form.from_account_id}
+                    onChange={e => setForm(p => ({ ...p, from_account_id: e.target.value }))}
+                    className="input-base"
+                  >
+                    <option value="">Select account…</option>
+                    {fundingAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{accountLabel(a)} — {fmt(a.current_balance)}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-xs text-slate-500 italic py-2">
+                    No checking or savings accounts yet. Add one in Accounts to link it here.
+                  </p>
+                )}
+              </div>
+
+              {payeeAccounts.length > 0 && (
+                <div>
+                  <label className="text-xs text-slate-400 font-medium mb-1.5 block">Pay To (Destination Account, optional)</label>
+                  <select
+                    value={form.to_account_id}
+                    onChange={e => setForm(p => ({ ...p, to_account_id: e.target.value }))}
+                    className="input-base"
+                  >
+                    <option value="">None — external payee</option>
+                    {payeeAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{accountLabel(a)}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-slate-400 font-medium mb-1.5 block">Frequency</label>
