@@ -8,8 +8,8 @@ const fmt = (n: number) =>
 
 const FREQUENCIES = ['Once', 'Weekly', 'Biweekly', 'Monthly', 'Quarterly', 'Annually']
 const ASSET_TYPES = ['checking', 'savings', 'investment', 'retirement', 'cd']
-const DEBT_TYPES  = ['credit_card', 'buy_now_pay_later', 'mortgage', 'auto_loan',
-  'student_loan', 'personal_loan', 'heloc', 'other']
+// Only valid DB enum values — buy_now_pay_later is stored as credit_card+icon in DB
+const DB_DEBT_TYPES = ['credit_card', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan', 'heloc', 'other']
 
 // ── Helpers ───────────────────────────────────────────────────
 function parseMemo(memo: string | null): Record<string, unknown> {
@@ -65,7 +65,7 @@ export default function PaymentsPage() {
         .in('account_type', ASSET_TYPES).order('sort_order'),
       supabase.from('financial_accounts').select('*')
         .eq('owner_id', user.id).is('deleted_at', null)
-        .in('account_type', DEBT_TYPES).order('sort_order'),
+        .in('account_type', DB_DEBT_TYPES).order('sort_order'),
     ]).then(([{ data: pmts }, { data: accs }, { data: debts }]) => {
       setPayments(pmts ?? [])
       setAssetAccounts(accs ?? [])
@@ -315,7 +315,8 @@ export default function PaymentsPage() {
                       <option key={a.id} value={a.id}>
                         {a.nickname ?? a.institution_name}
                         {' · '}
-                        {a.account_type.replace(/_/g, ' ')}
+                        {(a.icon && ['buy_now_pay_later','stocks','bonds','bitcoin','retirement_/_401k','other_investment'].includes(a.icon)
+                          ? a.icon : a.account_type).replace(/_/g, ' ')}
                         {a.current_balance !== 0 ? ` · Balance: ${fmt(Math.abs(a.current_balance))}` : ''}
                       </option>
                     ))}
