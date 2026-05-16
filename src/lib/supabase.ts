@@ -8,6 +8,14 @@ const supabaseAnonKey =
 if (!supabaseUrl) throw new Error('Missing VITE_SUPABASE_URL')
 if (!supabaseAnonKey) throw new Error('Missing VITE_SUPABASE_ANON_KEY')
 
+// Supabase anon keys are JWTs — catch copy-paste errors or placeholder values early
+if (!supabaseAnonKey.startsWith('eyJ')) {
+  throw new Error(
+    'VITE_SUPABASE_ANON_KEY does not look like a valid JWT. ' +
+    'Copy the "anon public" key from Supabase → Settings → API and redeploy.'
+  )
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,

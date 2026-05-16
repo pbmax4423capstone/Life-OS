@@ -3,7 +3,8 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, CreditCard, Calendar, BarChart3,
   Star, Plane, Heart, Briefcase, LogOut, Settings,
-  Bell, Menu, X, ScanLine, TrendingDown, PiggyBank, MessageSquare
+  Bell, Menu, X, ScanLine, TrendingDown, PiggyBank, MessageSquare,
+  GraduationCap, FolderOpen
 } from 'lucide-react'
 import { FloatingChat } from '@/components/chat/AiChat'
 import { useAuthStore } from '@/stores/authStore'
@@ -13,17 +14,19 @@ import { PasteIndicator } from '@/components/shared/PasteIndicator'
 import type { RecognitionResult } from '@/lib/imageRecognition'
 
 const NAV = [
-  { to: '/',                       label: 'Dashboard',     icon: LayoutDashboard },
-  { to: '/accounts',               label: 'Accounts',      icon: CreditCard      },
-  { to: '/payments',               label: 'Payments',      icon: Calendar        },
-  { to: '/analytics',              label: 'Analytics',     icon: BarChart3       },
-  { to: '/finance/debt-planner',   label: 'Debt Planner',  icon: TrendingDown    },
-  { to: '/finance/retirement',     label: '401K Loans',    icon: PiggyBank       },
-  { to: '/rewards',                label: 'Rewards',       icon: Star            },
-  { to: '/travel',                 label: 'Travel',        icon: Plane           },
-  { to: '/health',                 label: 'Health',        icon: Heart           },
-  { to: '/jobs',                   label: 'Jobs',          icon: Briefcase       },
-  { to: '/chat',                   label: 'AI Chat',       icon: MessageSquare   },
+  { to: '/',                       label: 'Dashboard',       icon: LayoutDashboard, section: 'Overview' },
+  { to: '/accounts',               label: 'Accounts',        icon: CreditCard,      section: 'Finance' },
+  { to: '/payments',               label: 'Payments',        icon: Calendar,        section: 'Finance' },
+  { to: '/analytics',              label: 'Analytics',       icon: BarChart3,       section: 'Finance' },
+  { to: '/credit',                 label: 'Credit Score',    icon: Star,            section: 'Finance' },
+  { to: '/finance/debt-planner',   label: 'Debt Planner',    icon: TrendingDown,    section: 'Finance' },
+  { to: '/finance/retirement',     label: '401K Loans',      icon: PiggyBank,       section: 'Finance' },
+  { to: '/health',                 label: 'Health',          icon: Heart,           section: 'Life' },
+  { to: '/jobs',                   label: 'Job Search',      icon: Briefcase,       section: 'Career' },
+  { to: '/prodev',                 label: 'Pro Development', icon: GraduationCap,   section: 'Career' },
+  { to: '/travel',                 label: 'Travel & Miles',  icon: Plane,           section: 'Travel' },
+  { to: '/documents',              label: 'Documents',       icon: FolderOpen,      section: 'Vault' },
+  { to: '/chat',                   label: 'AI Chat',         icon: MessageSquare,   section: 'Tools' },
 ]
 
 export default function AppShell() {
@@ -81,15 +84,20 @@ export default function AppShell() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto mt-2">
-          {NAV.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to} end={to === '/'}
-              className={({ isActive }) =>
-                `nav-item ${isActive ? 'nav-item-active' : ''}`
-              }>
-              <Icon size={16} />
-              {label}
-            </NavLink>
+        <nav className="flex-1 p-2 overflow-y-auto mt-2">
+          {[...new Set(NAV.map(n => n.section))].map(section => (
+            <div key={section}>
+              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">{section}</div>
+              {NAV.filter(n => n.section === section).map(({ to, label, icon: Icon }) => (
+                <NavLink key={to} to={to} end={to === '/'}
+                  className={({ isActive }) =>
+                    `nav-item ${isActive ? 'nav-item-active' : ''}`
+                  }>
+                  <Icon size={15} />
+                  {label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 
@@ -123,7 +131,7 @@ export default function AppShell() {
               </div>
               <button onClick={() => setMobileOpen(false)} className="text-slate-400"><X size={18} /></button>
             </div>
-            <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+            <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
               {NAV.map(({ to, label, icon: Icon }) => (
                 <NavLink key={to} to={to} end={to === '/'}
                   onClick={() => setMobileOpen(false)}

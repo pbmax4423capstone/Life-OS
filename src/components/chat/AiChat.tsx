@@ -81,7 +81,7 @@ function ActionButton({ action, onAction }: { action: Record<string, unknown>; o
       className="inline-flex items-center gap-1.5 text-xs bg-brand-500/15 hover:bg-brand-500/25 text-brand-300 border border-brand-500/30 rounded-lg px-3 py-1.5 transition-all mt-2"
     >
       {icons[action.type as string] ?? <ChevronRight size={13} />}
-      {action.label as string}
+      {String(action.label ?? '')}
     </button>
   )
 }
@@ -110,8 +110,8 @@ export function AiChat({ initialContext = 'general', embedded = false, onClose, 
 
   // Load conversations
   useEffect(() => {
-    getConversations().then(setConversations)
-    if (user) buildFinancialContext(user.id).then(setContextSummary)
+    getConversations().then(setConversations).catch(() => {})
+    if (user) buildFinancialContext(user.id).then(setContextSummary).catch(() => {})
   }, [user])
 
   // Scroll to bottom on new messages
@@ -119,7 +119,7 @@ export function AiChat({ initialContext = 'general', embedded = false, onClose, 
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const startNewConversation = useCallback(async (): Promise<Conversation> => {
+  const startNewConversation = useCallback(async (): Promise<Conversation | null> => {
     setLoading(true)
     try {
       const conv = await createConversation(initialContext)
@@ -128,6 +128,8 @@ export function AiChat({ initialContext = 'general', embedded = false, onClose, 
       setConversations(prev => [conv, ...prev])
       setTimeout(() => inputRef.current?.focus(), 100)
       return conv
+    } catch {
+      return null
     } finally {
       setLoading(false)
     }
@@ -136,7 +138,7 @@ export function AiChat({ initialContext = 'general', embedded = false, onClose, 
   // Auto-start if no conversations
   useEffect(() => {
     if (conversations.length === 0 && !activeConv && !loading) {
-      startNewConversation()
+      startNewConversation().catch(() => {})
     }
   }, [conversations.length, activeConv, loading, startNewConversation])
 
@@ -154,6 +156,7 @@ export function AiChat({ initialContext = 'general', embedded = false, onClose, 
     let conv = activeConv
     if (!conv) {
       conv = await startNewConversation()
+      if (!conv) return
     }
     setInput('')
     setSending(true)

@@ -1,36 +1,3 @@
-// Stub pages — each will be expanded by their respective agents
-
-export function AccountsPage() {
-  return <ComingSoon title="Accounts" desc="Finance Agent — Phase 2" />
-}
-export function PaymentsPage() {
-  return <ComingSoon title="Payments" desc="Finance Agent — Phase 2" />
-}
-export function AnalyticsPage() {
-  return <ComingSoon title="Analytics" desc="Finance Agent — Phase 2" />
-}
-export function RewardsPage() {
-  return <ComingSoon title="Rewards" desc="Finance Agent — Phase 2" />
-}
-export function TravelPage() {
-  return <ComingSoon title="Travel & Miles" desc="Travel Agent — Phase 4" />
-}
-export function HealthPage() {
-  return <ComingSoon title="Health" desc="Health Agent — Phase 4" />
-}
-export function JobsPage() {
-  return <ComingSoon title="Jobs & Career" desc="Jobs Agent — Phase 4" />
-}
-export function SettingsPage() {
-  return <ComingSoon title="Settings" desc="Coming soon" />
-}
-export function PrivacyPage() {
-  return <ComingSoon title="Privacy Policy" desc="Privacy details coming soon" />
-}
-export function TermsPage() {
-  return <ComingSoon title="Terms of Service" desc="Terms details coming soon" />
-}
-
 function ComingSoon({ title, desc }: { title: string; desc: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-64 text-center animate-fade-in">
@@ -42,4 +9,14 @@ function ComingSoon({ title, desc }: { title: string; desc: string }) {
       </p>
     </div>
   )
+}
+
+export function SettingsPage() {
+  return <ComingSoon title="Settings" desc="Coming soon" />
+}
+export function PrivacyPage() {
+  return <ComingSoon title="Privacy Policy" desc="Privacy details coming soon" />
+}
+export function TermsPage() {
+  return <ComingSoon title="Terms of Service" desc="Terms details coming soon" />
 }

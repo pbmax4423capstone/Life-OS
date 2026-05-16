@@ -17,15 +17,23 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!user) return
-    const load = async () => {
-      const [{ data: accs }, { data: pmts }] = await Promise.all([
-        supabase.from('financial_accounts').select('*').eq('owner_id', user.id).is('deleted_at', null).order('sort_order'),
-        supabase.from('scheduled_payments').select('*').eq('owner_id', user.id).is('deleted_at', null).order('next_due_date').limit(5),
-      ])
-      setAccounts(accs ?? [])
-      setPayments(pmts ?? [])
+    if (!user) {
       setLoading(false)
+      return
+    }
+    const load = async () => {
+      try {
+        const [{ data: accs }, { data: pmts }] = await Promise.all([
+          supabase.from('financial_accounts').select('*').eq('owner_id', user.id).is('deleted_at', null).order('sort_order'),
+          supabase.from('scheduled_payments').select('*').eq('owner_id', user.id).is('deleted_at', null).order('next_due_date').limit(5),
+        ])
+        setAccounts(accs ?? [])
+        setPayments(pmts ?? [])
+      } catch {
+        // Stay with empty arrays on error
+      } finally {
+        setLoading(false)
+      }
     }
     load()
   }, [user])

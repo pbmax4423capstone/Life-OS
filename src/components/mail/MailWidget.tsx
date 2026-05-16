@@ -18,20 +18,25 @@ export function MailWidget() {
   const [previewPieces, setPreviewPieces] = useState<Record<string, string[]>>({})
 
   const load = useCallback(async () => {
-    const [d, s] = await Promise.all([getRecentDeliveries(5), getSyncState()])
-    setDeliveries(d)
-    setSyncState(s)
-    setLoading(false)
+    try {
+      const [d, s] = await Promise.all([getRecentDeliveries(5), getSyncState()])
+      setDeliveries(d)
+      setSyncState(s)
 
-    // Load preview thumbnails for top 2 deliveries
-    const previews: Record<string, string[]> = {}
-    for (const delivery of d.slice(0, 2)) {
-      const pieces = await getMailPieces(delivery.id)
-      previews[delivery.id] = pieces
-        .slice(0, 4)
-        .map(p => getMailImageUrl(p.image_storage_path))
+      // Load preview thumbnails for top 2 deliveries
+      const previews: Record<string, string[]> = {}
+      for (const delivery of d.slice(0, 2)) {
+        const pieces = await getMailPieces(delivery.id)
+        previews[delivery.id] = pieces
+          .slice(0, 4)
+          .map(p => getMailImageUrl(p.image_storage_path))
+      }
+      setPreviewPieces(previews)
+    } catch {
+      // Table may not exist for new users; treat as empty
+    } finally {
+      setLoading(false)
     }
-    setPreviewPieces(previews)
   }, [])
 
   useEffect(() => { load() }, [load])

@@ -52,12 +52,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
         set({ session, user: session?.user ?? null })
         if (session?.user) {
-          const { data } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single()
-          set({ profile: data })
+          try {
+            const { data } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', session.user.id)
+              .single()
+            set({ profile: data ?? null })
+          } catch {
+            set({ profile: null })
+          }
         } else {
           set({ profile: null })
         }

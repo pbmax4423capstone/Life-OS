@@ -106,7 +106,7 @@ export async function getConversations(): Promise<Conversation[]> {
     .order('pinned', { ascending: false })
     .order('last_message_at', { ascending: false })
     .limit(30)
-  if (error) throw error
+  if (error) return []
   return data ?? []
 }
 
@@ -297,6 +297,44 @@ export async function sendMessage(opts: {
   } catch (err) {
     opts.onError(err instanceof Error ? err.message : 'Unknown error')
   }
+}
+
+// ── Non-streaming AI call (for Resume Helper, Study Helper, etc.) ──
+export async function callAI(
+  userMessage: string,
+  systemPrompt?: string,
+  maxTokens = 2000
+): Promise<string> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  if (!supabaseUrl) throw new Error('Missing VITE_SUPABASE_URL')
+
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new Error('Not authenticated')
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/anthropic-proxy`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      requestType: 'ai_helper',
+      payload: {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: maxTokens,
+        ...(systemPrompt ? { system: systemPrompt } : {}),
+        messages: [{ role: 'user', content: userMessage }],
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`AI error (${response.status}): ${err}`)
+  }
+
+  const data = await response.json()
+  return data.content?.[0]?.text ?? ''
 }
 
 // ── Suggested prompts by context ─────────────────────────────

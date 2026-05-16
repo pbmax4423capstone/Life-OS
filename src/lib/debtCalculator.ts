@@ -94,6 +94,18 @@ function runStrategy(
   priority: DebtAccount[],
   extraMonthly: number
 ): StrategyResult {
+  if (accounts.length === 0) {
+    return {
+      strategy: 'avalanche',
+      accounts: [],
+      totalInterest: 0,
+      totalMonths: 0,
+      payoffDate: new Date(),
+      totalPaid: 0,
+      monthlySummary: [],
+    }
+  }
+
   // Working state
   const balances = Object.fromEntries(accounts.map(a => [a.id, a.balance]))
   const interest = Object.fromEntries(accounts.map(a => [a.id, 0]))
