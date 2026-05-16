@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload } from 'lucide-react'
+import { Plus, Trash2, Pencil, CreditCard, Loader2, ScanLine, Upload } from 'lucide-react'
 import { supabase, type FinancialAccount } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { recognizeImage } from '@/lib/imageRecognition'
@@ -39,6 +39,7 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
@@ -118,12 +119,28 @@ export default function AccountsPage() {
   const totalDebt = accounts.filter(a => a.current_balance < 0).reduce((s, a) => s + Math.abs(a.current_balance), 0)
   const netWorth = totalAssets - totalDebt
 
-  const add = async () => {
+  const openEdit = (a: FinancialAccount) => {
+    setEditingId(a.id)
+    setForm({
+      nickname: a.nickname ?? '',
+      account_type: a.account_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      institution_name: a.institution_name,
+      last_four: a.last_four ?? '',
+      current_balance: String(a.current_balance),
+      interest_rate: a.interest_rate != null ? String(a.interest_rate) : '',
+      credit_limit: a.credit_limit != null ? String(a.credit_limit) : '',
+      rewards_balance: a.rewards_balance > 0 ? String(a.rewards_balance) : '',
+      color: a.color,
+    })
+    setScanError(null)
+    setShowAdd(true)
+  }
+
+  const save = async () => {
     if (!user || !form.institution_name) return
     setSaving(true)
     const typeKey = form.account_type.toLowerCase().replace(/ /g, '_')
-    const { data, error } = await supabase.from('financial_accounts').insert({
-      owner_id: user.id,
+    const payload = {
       account_type: typeKey,
       institution_name: form.institution_name,
       nickname: form.nickname || null,
@@ -133,12 +150,21 @@ export default function AccountsPage() {
       credit_limit: parseFloat(form.credit_limit) || null,
       rewards_balance: parseFloat(form.rewards_balance) || 0,
       color: form.color,
-      status: 'active', sort_order: accounts.length,
-      rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
-    }).select('*').single()
-    if (!error && data) setAccounts(p => [...p, data])
+    }
+    if (editingId) {
+      const { data, error } = await supabase.from('financial_accounts').update(payload).eq('id', editingId).select('*').single()
+      if (!error && data) setAccounts(p => p.map(a => a.id === editingId ? data : a))
+    } else {
+      const { data, error } = await supabase.from('financial_accounts').insert({
+        owner_id: user.id, ...payload,
+        status: 'active', sort_order: accounts.length,
+        rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
+      }).select('*').single()
+      if (!error && data) setAccounts(p => [...p, data])
+    }
     setSaving(false)
     setShowAdd(false)
+    setEditingId(null)
     setForm(BLANK_FORM)
   }
 
@@ -175,7 +201,7 @@ export default function AccountsPage() {
               ? <><Loader2 size={15} className="animate-spin text-brand-400" /> Scanning…</>
               : <><ScanLine size={15} className="text-brand-400" /> Import Snip</>}
           </button>
-          <button onClick={() => { setForm(BLANK_FORM); setScanError(null); setShowAdd(true) }} className="btn-primary flex items-center gap-2">
+          <button onClick={() => { setForm(BLANK_FORM); setEditingId(null); setScanError(null); setShowAdd(true) }} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Account
           </button>
         </div>
@@ -260,9 +286,14 @@ export default function AccountsPage() {
                   <td className="px-5 py-3 text-slate-300">{a.interest_rate ? `${a.interest_rate}%` : '—'}</td>
                   <td className="px-5 py-3 text-slate-300">{a.rewards_balance > 0 ? `${a.rewards_balance.toLocaleString()} pts` : '—'}</td>
                   <td className="px-5 py-3">
-                    <button onClick={() => del(a.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => openEdit(a)} className="text-slate-600 hover:text-brand-400 transition-colors p-1">
+                        <Pencil size={14} />
+                      </button>
+                      <button onClick={() => del(a.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -277,11 +308,11 @@ export default function AccountsPage() {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
 
             <h3 className="text-lg font-bold text-slate-100 mb-4">
-              {form.institution_name ? 'Review Scanned Account' : 'Add Account'}
+              {editingId ? 'Edit Account' : form.institution_name ? 'Review Scanned Account' : 'Add Account'}
             </h3>
 
-            {/* ── Paste / drop zone ── */}
-            <div
+            {/* ── Paste / drop zone — hidden when editing an existing account ── */}
+            {!editingId && <div
               className={`mb-5 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all group
                 ${scanning
                   ? 'border-brand-500/60 bg-brand-500/5'
@@ -311,7 +342,7 @@ export default function AccountsPage() {
                   </p>
                 </>
               )}
-            </div>
+            </div>}
 
             {scanError && (
               <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mb-4">
@@ -374,20 +405,22 @@ export default function AccountsPage() {
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={add} disabled={saving || !form.institution_name || scanning} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Account'}
+              <button onClick={save} disabled={saving || !form.institution_name || scanning} className="btn-primary flex-1 justify-center flex items-center gap-2">
+                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editingId ? 'Save Changes' : 'Save Account'}
               </button>
-              <button onClick={() => { setShowAdd(false); setScanError(null) }} className="btn-ghost">Cancel</button>
+              <button onClick={() => { setShowAdd(false); setEditingId(null); setScanError(null) }} className="btn-ghost">Cancel</button>
             </div>
 
-            {/* Re-scan shortcut inside modal */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={scanning}
-              className="w-full mt-3 flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-brand-400 transition-colors py-1"
-            >
-              <Upload size={12} /> Browse for a different screenshot
-            </button>
+            {/* Re-scan shortcut inside modal — only when adding */}
+            {!editingId && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={scanning}
+                className="w-full mt-3 flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-brand-400 transition-colors py-1"
+              >
+                <Upload size={12} /> Browse for a different screenshot
+              </button>
+            )}
           </div>
         </div>
       )}
