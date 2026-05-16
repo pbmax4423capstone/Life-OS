@@ -185,6 +185,7 @@ export default function AccountsPage() {
   const [payNowAccount, setPayNowAccount] = useState<FinancialAccount | null>(null)
   const [payNowAmount, setPayNowAmount] = useState('')
   const [payNowDate, setPayNowDate] = useState('')
+  const [payNowSourceId, setPayNowSourceId] = useState('')
   const [payingNow, setPayingNow] = useState(false)
   const [payNowError, setPayNowError] = useState<string | null>(null)
 
@@ -265,7 +266,8 @@ export default function AccountsPage() {
   const totalDue        = dueItems.reduce((s, i) => s + i.amount, 0)
   const budgetRemaining = parseFloat(budgetAmount) > 0 ? parseFloat(budgetAmount) - totalDue : null
 
-  // ── Open add modal ───────────────────────────────────────────
+  // ── Source accounts for Pay Now dropdown ─────────────────────
+  const sourceAccounts = accounts.filter(a => !isDebtAcc(a) && a.current_balance > 0)
   const openAdd = () => {
     setEditAccount(null)
     setForm(BLANK_FORM)
@@ -466,9 +468,12 @@ export default function AccountsPage() {
     const defaultAmt = sched?.amount
       ? String(sched.amount)
       : extras?.payment_amount ?? ''
+    // Auto-select the single checking account if there's only one source
+    const defaultSource = sourceAccounts.length === 1 ? sourceAccounts[0].id : ''
     setPayNowAccount(a)
     setPayNowAmount(defaultAmt)
     setPayNowDate(new Date().toISOString().split('T')[0])
+    setPayNowSourceId(defaultSource)
     setPayNowError(null)
   }
 
@@ -487,6 +492,19 @@ export default function AccountsPage() {
       .select('*').single()
     if (error) { setPayNowError(error.message); setPayingNow(false); return }
     if (data) setAccounts(p => p.map(a => a.id === data.id ? data : a))
+
+    // Deduct from the chosen source account
+    if (payNowSourceId) {
+      const src = sourceAccounts.find(a => a.id === payNowSourceId)
+      if (src) {
+        const newSrcBalance = src.current_balance - amount
+        const { data: srcData } = await supabase.from('financial_accounts')
+          .update({ current_balance: newSrcBalance })
+          .eq('id', src.id)
+          .select('*').single()
+        if (srcData) setAccounts(p => p.map(a => a.id === srcData.id ? srcData : a))
+      }
+    }
 
     // Update BNPL extras: decrement payments_remaining, record last_payment_date, advance due_date
     const dt = getDisplayType(payNowAccount)
@@ -1081,23 +1099,71 @@ export default function AccountsPage() {
                 />
               </div>
 
+              {/* Payment source dropdown */}
+              <div>
+                <label className="text-xs text-slate-400 font-medium mb-1.5 block">
+                  Pay From Account
+                  {!payNowSourceId && <span className="text-amber-500 ml-1 font-normal">— select to update source balance</span>}
+                </label>
+                {sourceAccounts.length === 0 ? (
+                  <div className="input-base text-slate-500 text-xs">
+                    No asset accounts found — add a checking or savings account first
+                  </div>
+                ) : (
+                  <select
+                    value={payNowSourceId}
+                    onChange={e => setPayNowSourceId(e.target.value)}
+                    className="input-base"
+                  >
+                    <option value="">— Select account (optional) —</option>
+                    {sourceAccounts.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.nickname ?? a.institution_name}
+                        {a.last_four ? ` ···${a.last_four}` : ''}
+                        {' · '}
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(a.current_balance)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
               <div>
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Date</label>
                 <input type="date" value={payNowDate} onChange={e => setPayNowDate(e.target.value)} className="input-base" />
               </div>
 
               {parseFloat(payNowAmount) > 0 && (
-                <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/50 text-xs">
-                  <div className="flex justify-between mb-1">
-                    <span className="text-slate-500">Current Balance</span>
+                <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/50 text-xs space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">{payNowAccount.nickname ?? payNowAccount.institution_name} balance</span>
                     <span className="text-red-400 font-semibold">{fmt(Math.abs(payNowAccount.current_balance))}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">After Payment</span>
+                    <span className="text-slate-500">After payment</span>
                     <span className={`font-semibold ${Math.abs(payNowAccount.current_balance) - parseFloat(payNowAmount) <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
                       {fmt(Math.max(0, Math.abs(payNowAccount.current_balance) - parseFloat(payNowAmount)))}
                     </span>
                   </div>
+                  {payNowSourceId && (() => {
+                    const src = sourceAccounts.find(a => a.id === payNowSourceId)
+                    if (!src) return null
+                    const afterSrc = src.current_balance - parseFloat(payNowAmount)
+                    return (
+                      <>
+                        <div className="border-t border-slate-700 pt-1.5 flex justify-between">
+                          <span className="text-slate-500">{src.nickname ?? src.institution_name} balance</span>
+                          <span className="text-emerald-400 font-semibold">{fmt(src.current_balance)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">After deduction</span>
+                          <span className={`font-semibold ${afterSrc >= 0 ? 'text-brand-400' : 'text-red-400'}`}>
+                            {fmt(afterSrc)}
+                          </span>
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
               )}
 
