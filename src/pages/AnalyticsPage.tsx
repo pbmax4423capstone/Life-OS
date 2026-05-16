@@ -165,7 +165,7 @@ export default function AnalyticsPage() {
                     <tr key={a.id} className="border-b border-slate-800/50 last:border-0">
                       <td className="px-4 py-2 font-medium">{a.nickname ?? a.institution_name}</td>
                       <td className="px-4 py-2 text-red-400">{fmtD(Math.abs(a.current_balance))}</td>
-                      <td className="px-4 py-2">{a.interest_rate ? `${a.interest_rate}%` : '—'}</td>
+                      <td className="px-4 py-2">{a.interest_rate != null ? `${a.interest_rate}%` : '—'}</td>
                       <td className="px-4 py-2 text-red-400">{fmtD(monthly)}</td>
                       <td className="px-4 py-2 text-red-400">{fmtD(monthly * (new Date().getMonth() + 1))}</td>
                       <td className="px-4 py-2 text-emerald-400">{a.rewards_balance > 0 ? `${a.rewards_balance.toLocaleString()} pts` : '—'}</td>

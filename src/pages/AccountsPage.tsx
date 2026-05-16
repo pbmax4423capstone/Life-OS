@@ -27,6 +27,37 @@ const ACCOUNT_TYPES = [...TYPE_OPTIONS.asset, ...TYPE_OPTIONS.investment, ...TYP
 const DEBT_TYPES    = ['credit_card', 'buy_now_pay_later', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan', 'heloc', '401k_loan']
 const INV_TYPES     = ['investment', 'retirement', 'retirement_/_401k', 'stocks', 'bonds', 'bitcoin', 'other_investment', 'money_market']
 
+// ── Extended type support ─────────────────────────────────────
+// The DB enum only allows a fixed set of account_type values.
+// Extended UI types are stored in the `icon` field and mapped to
+// the nearest valid DB enum value for persistence.
+const EXTENDED_TYPES = new Set([
+  'buy_now_pay_later', 'money_market', 'stocks', 'bonds', 'bitcoin',
+  'retirement_/_401k', 'other_investment', '401k_loan',
+])
+
+const DB_TYPE_MAP: Record<string, string> = {
+  buy_now_pay_later:    'credit_card',
+  money_market:         'savings',
+  stocks:               'investment',
+  bonds:                'investment',
+  bitcoin:              'investment',
+  'retirement_/_401k':  'retirement',
+  other_investment:     'investment',
+  '401k_loan':          'other',
+}
+
+/** Type stored in DB (valid enum value) */
+function toDbType(t: string): string {
+  return DB_TYPE_MAP[t] ?? t
+}
+
+/** Real display type: reads `icon` field for extended types */
+function getDisplayType(a: FinancialAccount): string {
+  if (a.icon && EXTENDED_TYPES.has(a.icon)) return a.icon
+  return a.account_type
+}
+
 function getCategory(t: string): 'asset' | 'investment' | 'debt' {
   if (INV_TYPES.includes(t))  return 'investment'
   if (DEBT_TYPES.includes(t)) return 'debt'
@@ -248,7 +279,7 @@ export default function AccountsPage() {
       nickname: form.nickname || null,
       last_four: form.last_four || null,
       current_balance: parseFloat(form.current_balance) || 0,
-      interest_rate: form.interest_rate ? parseFloat(form.interest_rate) : null,
+      interest_rate: form.interest_rate !== '' ? parseFloat(form.interest_rate) : null,
       credit_limit: form.credit_limit ? parseFloat(form.credit_limit) : null,
       rewards_balance: parseFloat(form.rewards_balance) || 0,
       color: form.color,
@@ -463,7 +494,7 @@ export default function AccountsPage() {
                       </div>
                       {a.credit_limit && !isBNPL && <div className="text-xs text-slate-500">Limit: {fmt(a.credit_limit)}</div>}
                     </td>
-                    <td className="px-5 py-3 text-slate-300">{a.interest_rate ? `${a.interest_rate}%` : '—'}</td>
+                    <td className="px-5 py-3 text-slate-300">{a.interest_rate != null ? `${a.interest_rate}%` : '—'}</td>
 
                     {/* Next Payment column — only meaningful for debt */}
                     <td className="px-5 py-3">
