@@ -223,6 +223,14 @@ export default function AccountsPage() {
   }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Tabs ─────────────────────────────────────────────────────
+  // paymentsByAccount MUST come first — getSortValue uses it inside sort()
+  const paymentsByAccount: Record<string, ScheduledPayment> = {}
+  scheduledPayments.forEach(p => {
+    if (p.from_account_id && !paymentsByAccount[p.from_account_id]) {
+      paymentsByAccount[p.from_account_id] = p
+    }
+  })
+
   const tabs = ['All', 'Assets', 'Debt', 'Investments']
   const tabFiltered = accounts.filter(a => {
     if (tab === 'Assets') return getCategory(getDisplayType(a)) === 'asset'
@@ -236,6 +244,7 @@ export default function AccountsPage() {
     else { setSortKey(key); setSortDir('asc') }
   }
 
+  // getSortValue MUST be declared before filtered (which calls sort() synchronously)
   const getSortValue = (a: FinancialAccount): string | number => {
     const dt     = getDisplayType(a)
     const extras = bnplData[a.id]
@@ -263,12 +272,7 @@ export default function AccountsPage() {
   })
 
   // ── Map each debt account → its next scheduled payment (must be before dueItems) ──
-  const paymentsByAccount: Record<string, ScheduledPayment> = {}
-  scheduledPayments.forEach(p => {
-    if (p.from_account_id && !paymentsByAccount[p.from_account_id]) {
-      paymentsByAccount[p.from_account_id] = p
-    }
-  })
+  // (paymentsByAccount is already declared above in the Tabs section)
 
   // ── Stat card calculations (same classifier as Dashboard) ──
   const isDebtAcc = (a: FinancialAccount) => DEBT_TYPES.includes(getDisplayType(a)) || a.current_balance < 0
