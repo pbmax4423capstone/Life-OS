@@ -145,12 +145,15 @@ function computeNextPayday(anchor: string, freq: string): string {
   return d.toISOString().split('T')[0]
 }
 
-// ── Payment budget (localStorage) ────────────────────────────
+// ── Payment budget — reads from the same key Payday Planner saves ──
 function loadBudget(): string {
-  try { return JSON.parse(localStorage.getItem('life_os_pay_budget') ?? 'null')?.amount ?? '' } catch { return '' }
+  try {
+    const payday = JSON.parse(localStorage.getItem('life_os_payday') ?? 'null')
+    return payday?.debt_budget ?? payday?.paycheck_amount ?? ''
+  } catch { return '' }
 }
-function saveBudgetAmount(amount: string) {
-  localStorage.setItem('life_os_pay_budget', JSON.stringify({ amount }))
+function saveBudgetAmount(_: string) {
+  // Budget is set in the Payday Planner on Dashboard — this is a no-op placeholder
 }
 
 const BLANK_FORM = {
@@ -263,8 +266,40 @@ export default function AccountsPage() {
     return []
   }).sort((a, b) => a.dueDate.localeCompare(b.dueDate)) : []
 
-  const totalDue        = dueItems.reduce((s, i) => s + i.amount, 0)
-  const budgetRemaining = parseFloat(budgetAmount) > 0 ? parseFloat(budgetAmount) - totalDue : null
+  // Payments already MADE this cycle — compute period start (one period back from nextPayday)
+  const periodStart = (() => {
+    if (!nextPayday || !paydaySettings) return null
+    const d = new Date(nextPayday + 'T00:00:00')
+    const step = { weekly: 7, biweekly: 14, 'semi-monthly': 15, monthly: 30 }[paydaySettings.frequency] ?? 14
+    if (paydaySettings.frequency === 'monthly') d.setMonth(d.getMonth() - 1)
+    else d.setDate(d.getDate() - step)
+    return d.toISOString().split('T')[0]
+  })()
+
+  const paidThisCycle = periodStart ? debtAccList.flatMap(a => {
+    const dt     = getDisplayType(a)
+    const extras = bnplData[a.id]
+    const sched  = paymentsByAccount[a.id]
+    // Only if due_date has moved PAST nextPayday (payment was made, advancing the date)
+    const paidDate = extras?.last_payment_date ?? (sched?.anchor_date ?? null)
+    const amount   = parseFloat(extras?.payment_amount || '0') || sched?.amount || 0
+    // Count if paid within this cycle AND due_date is now past nextPayday (was paid off this period)
+    if (paidDate && paidDate >= periodStart && paidDate <= nextPayday! && amount > 0) {
+      // Verify the original due was within this period (before payment advanced it)
+      const currentDue = dt === 'buy_now_pay_later' ? extras?.due_date : sched?.next_due_date
+      // If already in dueItems (still unpaid), skip — don't double count
+      if (dueItems.some(i => i.account.id === a.id)) return []
+      return [{ account: a, paidDate, amount, extras, sched }]
+    }
+    return []
+  }) : []
+
+  // Budget calculations — paid items still count against budget
+  const totalUnpaid   = dueItems.reduce((s, i) => s + i.amount, 0)
+  const totalPaid     = paidThisCycle.reduce((s, i) => s + i.amount, 0)
+  const totalDue      = totalUnpaid          // still owed (for display)
+  const totalAllocated = totalUnpaid + totalPaid  // total committed from budget
+  const budgetRemaining = parseFloat(budgetAmount) > 0 ? parseFloat(budgetAmount) - totalAllocated : null
 
   // ── Source accounts for Pay Now dropdown ─────────────────────
   const sourceAccounts = accounts.filter(a => !isDebtAcc(a) && a.current_balance > 0)
@@ -609,31 +644,41 @@ export default function AccountsPage() {
                 <h2 className="text-sm font-semibold text-slate-100">
                   Payments Due Before Payday
                   {dueItems.length > 0 && (
-                    <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">{dueItems.length} due</span>
+                    <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">{dueItems.length} unpaid</span>
                   )}
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">Next payday: <span className="text-emerald-400 font-medium">{nextPayday}</span></p>
+                <p className="text-xs text-slate-500 mt-0.5">Next payday: <span className="text-emerald-400 font-medium">{nextPayday}</span>
+                  {parseFloat(budgetAmount) <= 0 && <span className="text-slate-600 ml-2">· Set budget in <span className="text-brand-400">Payday Planner</span> on Dashboard</span>}
+                </p>
               </div>
             </div>
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-slate-500 whitespace-nowrap">Payment Budget</label>
-                <div className="relative">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">$</span>
-                  <input type="number" value={budgetAmount}
-                    onChange={e => { setBudgetAmountState(e.target.value); saveBudgetAmount(e.target.value) }}
-                    className="input-base pl-6 py-1.5 text-sm w-28" placeholder="0" />
-                </div>
+
+            {/* Budget summary pills */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-xs bg-slate-800/60 rounded-xl px-3 py-2 border border-slate-700/50">
+                <span className="text-slate-500">Budget</span>
+                <span className={`font-bold ${parseFloat(budgetAmount) > 0 ? 'text-emerald-400' : 'text-slate-600'}`}>
+                  {parseFloat(budgetAmount) > 0 ? fmt(parseFloat(budgetAmount)) : 'Not set'}
+                </span>
               </div>
-              <div className="text-right">
-                <div className="text-sm font-bold text-amber-400">{fmt(totalDue)} due</div>
-                {budgetRemaining != null && (
-                  <div className={`text-xs font-semibold ${budgetRemaining >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {fmt(Math.abs(budgetRemaining))} {budgetRemaining >= 0 ? 'remaining' : 'over budget'}
-                  </div>
-                )}
+              <span className="text-slate-600 text-xs">−</span>
+              <div className="flex items-center gap-2 text-xs bg-slate-800/60 rounded-xl px-3 py-2 border border-slate-700/50">
+                <span className="text-slate-500">Scheduled</span>
+                <span className="font-bold text-amber-400">{fmt(totalAllocated)}</span>
+                {totalPaid > 0 && <span className="text-emerald-400 text-xs">(incl. {fmt(totalPaid)} paid)</span>}
               </div>
-              {dueItems.length > 0 && (
+              <span className="text-slate-600 text-xs">=</span>
+              <div className={`flex items-center gap-2 text-xs rounded-xl px-3 py-2 border font-bold ${
+                budgetRemaining == null ? 'bg-slate-800/60 border-slate-700/50 text-slate-500'
+                  : budgetRemaining >= 0 ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+                  : 'bg-red-500/10 border-red-500/25 text-red-400'
+              }`}>
+                {budgetRemaining != null ? (
+                  <>{budgetRemaining >= 0 ? fmt(budgetRemaining) : `−${fmt(Math.abs(budgetRemaining))}`} remaining</>
+                ) : 'No budget set'}
+              </div>
+
+              {(dueItems.length > 0 || paidThisCycle.length > 0) && (
                 <button onClick={() => setShowDueExpanded(v => !v)}
                   className="btn-ghost text-xs py-1 px-3 flex items-center gap-1">
                   {showDueExpanded ? <><ChevronUp size={13} /> Hide</> : <><ChevronDown size={13} /> Details</>}
@@ -643,33 +688,62 @@ export default function AccountsPage() {
           </div>
 
           {showDueExpanded && (
-            <div className="mt-4 space-y-2">
-              {dueItems.map(item => (
-                <div key={item.account.id}
-                  className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-900/60 border border-slate-800/60 hover:border-slate-700 transition-all">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-7 rounded-full flex-shrink-0" style={{ backgroundColor: item.account.color }} />
-                    <div>
-                      <div className="text-sm font-medium text-slate-200">{item.account.nickname ?? item.account.institution_name}</div>
-                      <div className="text-xs text-slate-500">
-                        Due {item.dueDate}
-                        {item.extras?.last_payment_date && <span className="text-emerald-400 ml-2">· Last paid {item.extras.last_payment_date}</span>}
+            <div className="mt-4 space-y-3">
+              {/* Unpaid */}
+              {dueItems.length > 0 && (
+                <div>
+                  <div className="text-xs text-amber-400 font-semibold uppercase tracking-wide mb-2">Still Due</div>
+                  {dueItems.map(item => (
+                    <div key={item.account.id}
+                      className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-900/60 border border-amber-500/20 mb-1.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-7 rounded-full flex-shrink-0" style={{ backgroundColor: item.account.color }} />
+                        <div>
+                          <div className="text-sm font-medium text-slate-200">{item.account.nickname ?? item.account.institution_name}</div>
+                          <div className="text-xs text-slate-500">Due {item.dueDate}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-semibold text-amber-400">{fmt(item.amount)}</span>
+                        <button onClick={e => openPayNow(item.account, e)}
+                          className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-brand-500/15 hover:bg-brand-500/25 text-brand-400 border border-brand-500/20 transition-colors">
+                          <DollarSign size={11} /> Pay Now
+                        </button>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold text-amber-400">{fmt(item.amount)}</span>
-                    <button onClick={e => openPayNow(item.account, e)}
-                      className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-brand-500/15 hover:bg-brand-500/25 text-brand-400 border border-brand-500/20 transition-colors">
-                      <DollarSign size={11} /> Pay Now
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
+
+              {/* Paid this cycle */}
+              {paidThisCycle.length > 0 && (
+                <div>
+                  <div className="text-xs text-emerald-400 font-semibold uppercase tracking-wide mb-2">Paid This Cycle</div>
+                  {paidThisCycle.map(item => (
+                    <div key={item.account.id}
+                      className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-900/60 border border-emerald-500/20 mb-1.5 opacity-75">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-7 rounded-full flex-shrink-0" style={{ backgroundColor: item.account.color }} />
+                        <div>
+                          <div className="text-sm font-medium text-slate-200">{item.account.nickname ?? item.account.institution_name}</div>
+                          <div className="text-xs text-emerald-400">✓ Paid {item.paidDate}</div>
+                        </div>
+                      </div>
+                      <span className="text-sm font-semibold text-emerald-400">{fmt(item.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {dueItems.length === 0 && paidThisCycle.length === 0 && (
+                <div className="flex items-center gap-2 text-sm text-emerald-400 py-2">
+                  <CheckCircle2 size={15} /> All clear for this pay period!
+                </div>
+              )}
             </div>
           )}
 
-          {dueItems.length === 0 && (
+          {dueItems.length === 0 && paidThisCycle.length === 0 && (
             <div className="flex items-center gap-2 text-sm text-emerald-400 mt-3">
               <CheckCircle2 size={15} /> No payments due before {nextPayday} — you're all clear!
             </div>
