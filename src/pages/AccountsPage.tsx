@@ -18,14 +18,14 @@ const CATEGORY_CONFIG = {
 }
 
 const TYPE_OPTIONS: Record<string, string[]> = {
-  asset:      ['Checking', 'Savings', 'CD', 'Other'],
-  investment: ['Investment', 'Retirement'],
-  debt:       ['Credit Card', 'Buy Now Pay Later', 'Mortgage', 'Auto Loan', 'Student Loan'],
+  asset:      ['Checking', 'Savings', 'Money Market', 'CD', 'Other'],
+  investment: ['Investment', 'Retirement / 401K', 'Stocks', 'Bonds', 'Bitcoin', 'Other Investment'],
+  debt:       ['Credit Card', 'Buy Now Pay Later', 'Mortgage', 'Auto Loan', 'Student Loan', '401K Loan'],
 }
 
 const ACCOUNT_TYPES = [...TYPE_OPTIONS.asset, ...TYPE_OPTIONS.investment, ...TYPE_OPTIONS.debt]
-const DEBT_TYPES    = ['credit_card', 'buy_now_pay_later', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan', 'heloc']
-const INV_TYPES     = ['investment', 'retirement']
+const DEBT_TYPES    = ['credit_card', 'buy_now_pay_later', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan', 'heloc', '401k_loan']
+const INV_TYPES     = ['investment', 'retirement', 'retirement_/_401k', 'stocks', 'bonds', 'bitcoin', 'other_investment', 'money_market']
 
 function getCategory(t: string): 'asset' | 'investment' | 'debt' {
   if (INV_TYPES.includes(t))  return 'investment'

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { TrendingUp, TrendingDown, Wallet, Star, CalendarDays, Pencil, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
+import { TrendingUp, TrendingDown, Wallet, PiggyBank, BarChart2, CalendarDays, Pencil, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
@@ -10,6 +10,21 @@ const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 const fmtDec = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
+
+// ── 401K Loan type ────────────────────────────────────────────
+interface RetirementLoan {
+  id: string
+  plan_name: string
+  original_amount: number
+  current_balance: number
+  interest_rate: number
+  payoff_date: string
+  payment_amount: number
+  payment_frequency: string
+  payments_made: number
+  payments_remaining: number | null
+  status: string
+}
 
 // ── Payday settings (localStorage) ───────────────────────────
 interface PaydaySettings {
@@ -185,20 +200,24 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
   const [payments, setPayments] = useState<ScheduledPayment[]>([])
+  const [retirementLoans, setRetirementLoans] = useState<RetirementLoan[]>([])
   const [loading, setLoading] = useState(true)
   const [paydaySettings, setPaydaySettings] = useState<PaydaySettings | null>(loadPayday)
   const [showAssetDrilldown, setShowAssetDrilldown] = useState(false)
+  const [show401kDrilldown, setShow401kDrilldown] = useState(false)
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
     const load = async () => {
       try {
-        const [{ data: accs }, { data: pmts }] = await Promise.all([
+        const [{ data: accs }, { data: pmts }, { data: loans }] = await Promise.all([
           supabase.from('financial_accounts').select('*').eq('owner_id', user.id).is('deleted_at', null).order('sort_order'),
           supabase.from('scheduled_payments').select('*').eq('owner_id', user.id).is('deleted_at', null).order('next_due_date'),
+          supabase.from('retirement_loans').select('*').eq('owner_id', user.id).is('deleted_at', null),
         ])
         setAccounts(accs ?? [])
         setPayments(pmts ?? [])
+        setRetirementLoans((loans ?? []) as RetirementLoan[])
       } catch {
         // graceful empty state
       } finally {
@@ -217,7 +236,24 @@ export default function DashboardPage() {
   const assets = accounts.filter(a => a.current_balance > 0).reduce((s, a) => s + a.current_balance, 0)
   const debt = accounts.filter(a => a.current_balance < 0).reduce((s, a) => s + Math.abs(a.current_balance), 0)
   const netWorth = assets - debt
-  const totalRewardsValue = accounts.reduce((s, a) => s + (a.rewards_balance * a.rewards_cpp / 100), 0)
+
+  // Savings = savings + money_market + cd accounts
+  const savingsBalance = accounts
+    .filter(a => ['savings', 'money_market', 'cd'].includes(a.account_type))
+    .reduce((s, a) => s + a.current_balance, 0)
+
+  // Investments = non-retirement investment types (stocks, bonds, bitcoin, etc.)
+  const investmentBalance = accounts
+    .filter(a => ['investment', 'stocks', 'bonds', 'bitcoin', 'other_investment'].includes(a.account_type))
+    .reduce((s, a) => s + a.current_balance, 0)
+
+  // 401K = retirement accounts
+  const k401Balance = accounts
+    .filter(a => ['retirement', 'retirement_/_401k'].includes(a.account_type))
+    .reduce((s, a) => s + a.current_balance, 0)
+
+  // 401K Loans total
+  const k401LoanBalance = retirementLoans.reduce((s, l) => s + l.current_balance, 0)
 
   const checkingBalance = accounts
     .filter(a => a.account_type === 'checking' && a.current_balance > 0)
@@ -249,40 +285,133 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Stats row — Total Assets card is clickable */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {/* Clickable Total Assets card */}
+      {/* ── Stats row ── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+
+        {/* Net Worth */}
+        <div className="card p-4 col-span-2 md:col-span-1">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-slate-400 font-medium uppercase tracking-widest">Net Worth</span>
+            <Wallet size={13} className="text-indigo-400" />
+          </div>
+          <div className={`text-xl font-bold ${netWorth >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>{fmt(netWorth)}</div>
+        </div>
+
+        {/* Total Debt */}
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-slate-400 font-medium uppercase tracking-widest">Total Debt</span>
+            <TrendingDown size={13} className="text-red-400" />
+          </div>
+          <div className="text-xl font-bold text-red-400">{fmt(debt)}</div>
+        </div>
+
+        {/* Savings */}
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-slate-400 font-medium uppercase tracking-widest">Savings</span>
+            <PiggyBank size={13} className="text-emerald-400" />
+          </div>
+          <div className="text-xl font-bold text-emerald-400">{fmt(savingsBalance)}</div>
+          <div className="text-xs text-slate-600 mt-0.5">Savings · CD · Money Mkt</div>
+        </div>
+
+        {/* Investments */}
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-slate-400 font-medium uppercase tracking-widest">Investments</span>
+            <BarChart2 size={13} className="text-amber-400" />
+          </div>
+          <div className="text-xl font-bold text-amber-400">{fmt(investmentBalance)}</div>
+          <div className="text-xs text-slate-600 mt-0.5">Stocks · Bonds · Bitcoin</div>
+        </div>
+
+        {/* 401K Balance — clickable drill-down for assets */}
         <button
           onClick={() => setShowAssetDrilldown(v => !v)}
-          className={`card p-4 text-left transition-all hover:border-emerald-500/40 group ${showAssetDrilldown ? 'border-emerald-500/40 bg-emerald-500/5' : ''}`}
+          className={`card p-4 text-left transition-all hover:border-brand-500/40 group ${showAssetDrilldown ? 'border-brand-500/40 bg-brand-500/5' : ''}`}
         >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs text-slate-400 font-medium uppercase tracking-widest">Total Assets</span>
-            <div className="flex items-center gap-1">
-              <TrendingUp size={15} style={{ color: '#10B981' }} />
-              {showAssetDrilldown
-                ? <ChevronUp size={13} className="text-emerald-400" />
-                : <ChevronDown size={13} className="text-slate-600 group-hover:text-emerald-400 transition-colors" />}
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-slate-400 font-medium uppercase tracking-widest">401K Balance</span>
+            <div className="flex items-center gap-0.5">
+              <TrendingUp size={13} className="text-brand-400" />
+              {showAssetDrilldown ? <ChevronUp size={11} className="text-brand-400" /> : <ChevronDown size={11} className="text-slate-600 group-hover:text-brand-400 transition-colors" />}
             </div>
           </div>
-          <div className="text-xl font-bold text-emerald-400">{fmt(assets)}</div>
-          <div className="text-xs text-slate-500 mt-1">{accounts.filter(a => a.current_balance > 0).length} accounts · click to drill down</div>
+          <div className="text-xl font-bold text-brand-400">{fmt(k401Balance)}</div>
+          <div className="text-xs text-slate-600 mt-0.5">Retirement accounts</div>
         </button>
 
-        {[
-          { label: 'Net Worth',     value: fmt(netWorth),          icon: Wallet,      color: '#6366F1' },
-          { label: 'Total Debt',    value: fmt(debt),              icon: TrendingDown, color: '#EF4444' },
-          { label: 'Rewards Value', value: fmt(totalRewardsValue), icon: Star,        color: '#F59E0B' },
-        ].map(s => (
-          <div key={s.label} className="card p-4">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs text-slate-400 font-medium uppercase tracking-widest">{s.label}</span>
-              <s.icon size={15} style={{ color: s.color }} />
+        {/* 401K Loan Balance — clickable drill-down */}
+        <button
+          onClick={() => setShow401kDrilldown(v => !v)}
+          className={`card p-4 text-left transition-all hover:border-red-500/40 group ${show401kDrilldown ? 'border-red-500/40 bg-red-500/5' : ''}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-slate-400 font-medium uppercase tracking-widest">401K Loans</span>
+            <div className="flex items-center gap-0.5">
+              <TrendingDown size={13} className="text-red-400" />
+              {show401kDrilldown ? <ChevronUp size={11} className="text-red-400" /> : <ChevronDown size={11} className="text-slate-600 group-hover:text-red-400 transition-colors" />}
             </div>
-            <div className="text-xl font-bold" style={{ color: s.color }}>{s.value}</div>
           </div>
-        ))}
+          <div className="text-xl font-bold text-red-400">{fmt(k401LoanBalance)}</div>
+          <div className="text-xs text-slate-600 mt-0.5">{retirementLoans.length} loan{retirementLoans.length !== 1 ? 's' : ''} · click to expand</div>
+        </button>
       </div>
+
+      {/* ── 401K Loan drill-down ── */}
+      {show401kDrilldown && (
+        <div className="card p-5 border-red-500/20 bg-red-500/5 animate-fade-in">
+          <h2 className="text-sm font-semibold text-red-400 uppercase tracking-wide mb-4 flex items-center gap-2">
+            <TrendingDown size={14} /> 401K Loan Details
+          </h2>
+          {retirementLoans.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No 401K loans tracked.{' '}
+              <span className="text-brand-400 cursor-pointer hover:underline" onClick={() => navigate('/finance/retirement')}>
+                Add one in 401K Loans →
+              </span>
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-800">
+                    {['Plan Name', 'Beginning Balance', 'Current Balance', 'Monthly Payment', 'Payoff Date', 'Pmts Remaining'].map(h => (
+                      <th key={h} className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 px-4 py-2">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {retirementLoans.map(l => (
+                    <tr key={l.id} className="border-b border-slate-800/40 hover:bg-slate-800/20 last:border-0">
+                      <td className="px-4 py-2.5 font-medium text-slate-200">{l.plan_name}</td>
+                      <td className="px-4 py-2.5 text-slate-400">{fmtDec(l.original_amount)}</td>
+                      <td className="px-4 py-2.5 font-semibold text-red-400">{fmtDec(l.current_balance)}</td>
+                      <td className="px-4 py-2.5 text-slate-300">
+                        {fmtDec(l.payment_amount)}
+                        <span className="text-xs text-slate-500 ml-1">/{l.payment_frequency === 'biweekly' ? '2wk' : 'mo'}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-emerald-400">
+                        {l.payoff_date ? new Date(l.payoff_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-400">{l.payments_remaining ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-slate-700">
+                    <td className="px-4 py-2 text-xs font-semibold text-slate-400 uppercase">Total</td>
+                    <td className="px-4 py-2 text-slate-400 font-semibold">{fmtDec(retirementLoans.reduce((s, l) => s + l.original_amount, 0))}</td>
+                    <td className="px-4 py-2 font-bold text-red-400">{fmtDec(k401LoanBalance)}</td>
+                    <td colSpan={3} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Asset drill-down ── */}
       {showAssetDrilldown && (
