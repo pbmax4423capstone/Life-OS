@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { TrendingUp, TrendingDown, Wallet, Star, CalendarDays, Pencil, Plus, CheckCircle2 } from 'lucide-react'
+import { TrendingUp, TrendingDown, Wallet, Star, CalendarDays, Pencil, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { MailWidget } from '@/components/mail/MailWidget'
@@ -185,6 +185,7 @@ export default function DashboardPage() {
   const [payments, setPayments] = useState<ScheduledPayment[]>([])
   const [loading, setLoading] = useState(true)
   const [paydaySettings, setPaydaySettings] = useState<PaydaySettings | null>(loadPayday)
+  const [showAssetDrilldown, setShowAssetDrilldown] = useState(false)
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -246,13 +247,30 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Stats row */}
+      {/* Stats row — Total Assets card is clickable */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {/* Clickable Total Assets card */}
+        <button
+          onClick={() => setShowAssetDrilldown(v => !v)}
+          className={`card p-4 text-left transition-all hover:border-emerald-500/40 group ${showAssetDrilldown ? 'border-emerald-500/40 bg-emerald-500/5' : ''}`}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs text-slate-400 font-medium uppercase tracking-widest">Total Assets</span>
+            <div className="flex items-center gap-1">
+              <TrendingUp size={15} style={{ color: '#10B981' }} />
+              {showAssetDrilldown
+                ? <ChevronUp size={13} className="text-emerald-400" />
+                : <ChevronDown size={13} className="text-slate-600 group-hover:text-emerald-400 transition-colors" />}
+            </div>
+          </div>
+          <div className="text-xl font-bold text-emerald-400">{fmt(assets)}</div>
+          <div className="text-xs text-slate-500 mt-1">{accounts.filter(a => a.current_balance > 0).length} accounts · click to drill down</div>
+        </button>
+
         {[
-          { label: 'Net Worth',         value: fmt(netWorth),          icon: Wallet,      color: '#10B981' },
-          { label: 'Total Assets',      value: fmt(assets),            icon: TrendingUp,  color: '#6366F1' },
-          { label: 'Total Debt',        value: fmt(debt),              icon: TrendingDown, color: '#EF4444' },
-          { label: 'Rewards Value',     value: fmt(totalRewardsValue), icon: Star,        color: '#F59E0B' },
+          { label: 'Net Worth',     value: fmt(netWorth),          icon: Wallet,      color: '#6366F1' },
+          { label: 'Total Debt',    value: fmt(debt),              icon: TrendingDown, color: '#EF4444' },
+          { label: 'Rewards Value', value: fmt(totalRewardsValue), icon: Star,        color: '#F59E0B' },
         ].map(s => (
           <div key={s.label} className="card p-4">
             <div className="flex items-center justify-between mb-3">
@@ -263,6 +281,67 @@ export default function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {/* ── Asset drill-down ── */}
+      {showAssetDrilldown && (
+        <div className="card p-5 border-emerald-500/20 bg-emerald-500/5 animate-fade-in">
+          <h2 className="text-sm font-semibold text-emerald-400 uppercase tracking-wide mb-4 flex items-center gap-2">
+            <TrendingUp size={14} /> Asset Accounts
+          </h2>
+          {accounts.filter(a => a.current_balance > 0).length === 0 ? (
+            <p className="text-sm text-slate-500">No asset accounts found.</p>
+          ) : (
+            <div className="space-y-3">
+              {accounts.filter(a => a.current_balance > 0).map(a => {
+                // Payments sourced from this account
+                const accountPayments = payments.filter(p => p.from_account_id === a.id)
+                const totalScheduled = accountPayments.reduce((s, p) => s + p.amount, 0)
+                const afterPayments = a.current_balance - totalScheduled
+
+                return (
+                  <div key={a.id} className="flex items-center gap-4 p-3 rounded-xl bg-slate-900/60 border border-slate-800/60">
+                    <div className="w-2 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-sm font-medium text-slate-200 truncate">
+                          {a.nickname ?? a.institution_name}
+                        </span>
+                        <span className="text-sm font-bold text-emerald-400 ml-2">{fmtDec(a.current_balance)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500 capitalize">{a.account_type.replace(/_/g, ' ')}</span>
+                        <span className="text-xs text-slate-400">
+                          After scheduled payments:
+                          <span className={`font-semibold ml-1 ${afterPayments >= 0 ? 'text-brand-400' : 'text-red-400'}`}>
+                            {fmtDec(afterPayments)}
+                          </span>
+                        </span>
+                      </div>
+                      {totalScheduled > 0 && (
+                        <div className="mt-1.5">
+                          <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-brand-500 rounded-full"
+                              style={{ width: `${Math.min(100, Math.max(0, (afterPayments / a.current_balance) * 100))}%` }} />
+                          </div>
+                          <div className="text-xs text-slate-600 mt-0.5">
+                            {accountPayments.length} payment{accountPayments.length !== 1 ? 's' : ''} totaling {fmtDec(totalScheduled)} scheduled from this account
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+              <div className="flex items-center justify-between pt-3 border-t border-slate-800/60">
+                <span className="text-xs text-slate-500">Total assets after all scheduled payments</span>
+                <span className={`text-sm font-bold ${assets - payments.reduce((s, p) => s + p.amount, 0) >= 0 ? 'text-brand-400' : 'text-red-400'}`}>
+                  {fmtDec(assets - payments.reduce((s, p) => s + p.amount, 0))}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Checking after bills highlight */}
       {checkingAccounts.length > 0 && (
