@@ -43,6 +43,7 @@ export type Database = {
       job_applications: { Row: JobApplication; Insert: Partial<JobApplication>; Update: Partial<JobApplication> }
       certifications: { Row: Certification; Insert: Partial<Certification>; Update: Partial<Certification> }
       image_recognitions: { Row: ImageRecognition; Insert: Partial<ImageRecognition>; Update: Partial<ImageRecognition> }
+      plaid_items: { Row: PlaidItem; Insert: Partial<PlaidItem>; Update: Partial<PlaidItem> }
     }
   }
 }
@@ -63,6 +64,8 @@ export interface FinancialAccount {
   original_amount: number | null; interest_rate: number | null
   rewards_balance: number; rewards_unit: string; rewards_cpp: number
   color: string; icon: string; sort_order: number
+  plaid_account_id: string | null; plaid_item_id: string | null
+  plaid_last_synced: string | null
   deleted_at: string | null; created_at: string; updated_at: string
 }
 
@@ -73,6 +76,7 @@ export interface Transaction {
   category: string | null; transaction_date: string
   posted_date: string | null; is_pending: boolean
   is_recurring: boolean; notes: string | null; tags: string[]
+  plaid_transaction_id: string | null
   deleted_at: string | null; created_at: string; updated_at: string
 }
 
@@ -147,4 +151,12 @@ export interface ImageRecognition {
   ai_raw_output: Record<string, unknown> | null
   target_table: string | null; record_created_id: string | null
   status: string; created_at: string
+}
+
+export interface PlaidItem {
+  id: string; owner_id: string; plaid_item_id: string
+  plaid_access_token: string; institution_id: string | null
+  institution_name: string | null; status: string
+  last_synced_at: string | null
+  created_at: string; updated_at: string
 }
