@@ -199,9 +199,13 @@ export default function AccountsPage() {
   }
 
   // ── Save (insert or update) ──────────────────────────────────
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   const save = async () => {
     if (!user || !form.institution_name) return
     setSaving(true)
+    setSaveError(null)
+
     const isBNPL = form.account_type === 'Buy Now Pay Later'
     const typeKey = form.account_type.toLowerCase().replace(/ /g, '_')
 
@@ -217,59 +221,76 @@ export default function AccountsPage() {
       color: form.color,
     }
 
-    let accountId = editAccount?.id
-    if (editAccount) {
-      const { data } = await supabase.from('financial_accounts').update(payload).eq('id', editAccount.id).select('*').single()
-      if (data) setAccounts(p => p.map(a => a.id === data.id ? data : a))
-    } else {
-      const { data } = await supabase.from('financial_accounts').insert({
-        ...payload, owner_id: user.id, status: 'active', sort_order: accounts.length,
-        rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
-      }).select('*').single()
-      if (data) { setAccounts(p => [...p, data]); accountId = data.id }
-    }
+    try {
+      let accountId = editAccount?.id
 
-    // Save BNPL extras to localStorage
-    if (isBNPL && accountId) {
-      const extras: BNPLExtras = {
-        payment_amount: form.bnpl_payment_amount,
-        payment_interval: form.bnpl_interval,
-        due_date: form.bnpl_due_date,
-        auto_pay: form.bnpl_auto_pay,
-        payments_remaining: form.bnpl_payments_remaining,
+      // ── Insert or Update base account ──────────────────────
+      if (editAccount) {
+        const { data, error } = await supabase.from('financial_accounts')
+          .update(payload).eq('id', editAccount.id).select('*').single()
+        if (error) throw new Error(error.message)
+        if (data) setAccounts(p => p.map(a => a.id === data.id ? data : a))
+      } else {
+        const { data, error } = await supabase.from('financial_accounts').insert({
+          ...payload, owner_id: user.id, status: 'active', sort_order: accounts.length,
+          rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
+        }).select('*').single()
+        if (error) throw new Error(error.message)
+        if (data) { setAccounts(p => [...p, data]); accountId = data.id }
       }
-      const updated = { ...bnplData, [accountId]: extras }
-      setBnplData(updated)
-      saveBnpl(updated)
 
-      // Create/update a ScheduledPayment linked to this account
-      if (form.bnpl_payment_amount && form.bnpl_due_date && accountId) {
-        const existing = scheduledPayments.find(p => p.from_account_id === accountId)
-        const pmtPayload = {
-          owner_id: user.id,
-          from_account_id: accountId,
-          payee_name: form.institution_name,
-          amount: parseFloat(form.bnpl_payment_amount),
-          next_due_date: form.bnpl_due_date,
-          frequency: form.bnpl_interval.toLowerCase().replace('-', '_'),
+      // ── Save BNPL extras to localStorage ───────────────────
+      if (isBNPL && accountId) {
+        const extras: BNPLExtras = {
+          payment_amount: form.bnpl_payment_amount,
+          payment_interval: form.bnpl_interval,
+          due_date: form.bnpl_due_date,
           auto_pay: form.bnpl_auto_pay,
-          status: 'active',
-          memo: JSON.stringify({ payments_remaining: parseInt(form.bnpl_payments_remaining) || null }),
+          payments_remaining: form.bnpl_payments_remaining,
         }
-        if (existing) {
-          const { data: updated } = await supabase.from('scheduled_payments').update(pmtPayload).eq('id', existing.id).select('*').single()
-          if (updated) setScheduledPayments(p => p.map(x => x.id === updated.id ? updated : x))
-        } else {
-          const { data: created } = await supabase.from('scheduled_payments').insert(pmtPayload).select('*').single()
-          if (created) setScheduledPayments(p => [...p, created])
+        const updatedBnpl = { ...bnplData, [accountId]: extras }
+        setBnplData(updatedBnpl)
+        saveBnpl(updatedBnpl)
+
+        // Create/update the linked ScheduledPayment when payment details are provided
+        if (form.bnpl_payment_amount && form.bnpl_due_date) {
+          const existing = scheduledPayments.find(p => p.from_account_id === accountId)
+          const pmtPayload = {
+            owner_id: user.id,
+            from_account_id: accountId,
+            payee_name: form.institution_name,
+            amount: parseFloat(form.bnpl_payment_amount),
+            next_due_date: form.bnpl_due_date,
+            frequency: form.bnpl_interval.toLowerCase().replace(/\s+/g, '_'),
+            auto_pay: form.bnpl_auto_pay,
+            status: 'active',
+            memo: JSON.stringify({ payments_remaining: parseInt(form.bnpl_payments_remaining) || null }),
+          }
+          if (existing) {
+            const { data: updated, error } = await supabase.from('scheduled_payments')
+              .update(pmtPayload).eq('id', existing.id).select('*').single()
+            if (error) throw new Error(`Payment schedule: ${error.message}`)
+            if (updated) setScheduledPayments(p => p.map(x => x.id === updated.id ? updated : x))
+          } else {
+            const { data: created, error } = await supabase.from('scheduled_payments')
+              .insert(pmtPayload).select('*').single()
+            if (error) throw new Error(`Payment schedule: ${error.message}`)
+            if (created) setScheduledPayments(p => [...p, created])
+          }
         }
       }
-    }
 
-    setSaving(false)
-    setShowModal(false)
-    setEditAccount(null)
-    setForm(BLANK_FORM)
+      // ── Success — close modal ───────────────────────────────
+      setShowModal(false)
+      setEditAccount(null)
+      setForm(BLANK_FORM)
+      setSaveError(null)
+
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed — please try again')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const del = async (id: string, e: React.MouseEvent) => {
@@ -670,8 +691,14 @@ export default function AccountsPage() {
                     className="btn-primary flex-1 justify-center flex items-center gap-2">
                     {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editAccount ? 'Save Changes' : 'Save Account'}
                   </button>
-                  <button onClick={() => { setShowModal(false); setEditAccount(null); setScanError(null) }} className="btn-ghost">Cancel</button>
+                  <button onClick={() => { setShowModal(false); setEditAccount(null); setScanError(null); setSaveError(null) }} className="btn-ghost">Cancel</button>
                 </div>
+
+                {saveError && (
+                  <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mt-3">
+                    ⚠ {saveError}
+                  </p>
+                )}
 
                 {!editAccount && (
                   <button onClick={() => fileInputRef.current?.click()} disabled={scanning}

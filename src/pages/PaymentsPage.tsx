@@ -8,6 +8,8 @@ const fmt = (n: number) =>
 
 const FREQUENCIES = ['Once', 'Weekly', 'Biweekly', 'Monthly', 'Quarterly', 'Annually']
 const ASSET_TYPES = ['checking', 'savings', 'investment', 'retirement', 'cd']
+const DEBT_TYPES  = ['credit_card', 'buy_now_pay_later', 'mortgage', 'auto_loan',
+  'student_loan', 'personal_loan', 'heloc', 'other']
 
 // ── Helpers ───────────────────────────────────────────────────
 function parseMemo(memo: string | null): Record<string, unknown> {
@@ -36,6 +38,7 @@ export default function PaymentsPage() {
   const { user } = useAuthStore()
   const [payments, setPayments] = useState<ScheduledPayment[]>([])
   const [assetAccounts, setAssetAccounts] = useState<FinancialAccount[]>([])
+  const [debtAccounts, setDebtAccounts] = useState<FinancialAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -46,7 +49,9 @@ export default function PaymentsPage() {
   const [confirmingSave, setConfirmingSave] = useState(false)
 
   const [form, setForm] = useState({
-    payee_name: '', amount: '', next_due_date: '', from_account_id: '',
+    payee_account_id: '',   // id of the selected debt account
+    payee_name: '',         // display name (derived from selected account)
+    amount: '', next_due_date: '', from_account_id: '',
     frequency: 'Monthly', memo: '', auto_pay: false,
   })
 
@@ -58,9 +63,13 @@ export default function PaymentsPage() {
       supabase.from('financial_accounts').select('*')
         .eq('owner_id', user.id).is('deleted_at', null)
         .in('account_type', ASSET_TYPES).order('sort_order'),
-    ]).then(([{ data: pmts }, { data: accs }]) => {
+      supabase.from('financial_accounts').select('*')
+        .eq('owner_id', user.id).is('deleted_at', null)
+        .in('account_type', DEBT_TYPES).order('sort_order'),
+    ]).then(([{ data: pmts }, { data: accs }, { data: debts }]) => {
       setPayments(pmts ?? [])
       setAssetAccounts(accs ?? [])
+      setDebtAccounts(debts ?? [])
       setLoading(false)
     })
   }, [user])
@@ -78,6 +87,7 @@ export default function PaymentsPage() {
     const { data, error } = await supabase.from('scheduled_payments').insert({
       owner_id: user.id,
       from_account_id: form.from_account_id || null,
+      to_account_id: form.payee_account_id || null,  // link to the debt account
       payee_name: form.payee_name,
       amount: parseFloat(form.amount),
       next_due_date: form.next_due_date || today(),
@@ -89,7 +99,7 @@ export default function PaymentsPage() {
     if (!error && data) setPayments(p => [...p, data])
     setSaving(false)
     setShowAdd(false)
-    setForm({ payee_name: '', amount: '', next_due_date: '', from_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false })
+    setForm({ payee_account_id: '', payee_name: '', amount: '', next_due_date: '', from_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false })
   }
 
   // ── Mark as paid ──────────────────────────────────────────
@@ -278,10 +288,39 @@ export default function PaymentsPage() {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <h3 className="text-lg font-bold text-slate-100 mb-5">Schedule Payment</h3>
             <div className="space-y-4">
+              {/* Payee — debt account lookup */}
               <div>
-                <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payee *</label>
-                <input value={form.payee_name} onChange={e => setForm(p => ({ ...p, payee_name: e.target.value }))}
-                  className="input-base" placeholder="Chase Sapphire, Mortgage…" />
+                <label className="text-xs text-slate-400 font-medium mb-1.5 block">
+                  Payee (Debt Account) *
+                </label>
+                {debtAccounts.length === 0 ? (
+                  <div className="input-base text-slate-500 text-xs">
+                    No debt accounts found — add one in Accounts first
+                  </div>
+                ) : (
+                  <select
+                    value={form.payee_account_id}
+                    onChange={e => {
+                      const acct = debtAccounts.find(a => a.id === e.target.value)
+                      setForm(p => ({
+                        ...p,
+                        payee_account_id: e.target.value,
+                        payee_name: acct ? (acct.nickname ?? acct.institution_name) : '',
+                      }))
+                    }}
+                    className="input-base"
+                  >
+                    <option value="">— Select debt account —</option>
+                    {debtAccounts.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.nickname ?? a.institution_name}
+                        {' · '}
+                        {a.account_type.replace(/_/g, ' ')}
+                        {a.current_balance !== 0 ? ` · Balance: ${fmt(Math.abs(a.current_balance))}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* Payment Source — asset account picker */}
@@ -333,7 +372,7 @@ export default function PaymentsPage() {
               </label>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={add} disabled={saving || !form.payee_name || !form.amount} className="btn-primary flex-1 justify-center flex items-center gap-2">
+              <button onClick={add} disabled={saving || !form.payee_account_id || !form.amount} className="btn-primary flex-1 justify-center flex items-center gap-2">
                 {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Payment'}
               </button>
               <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
