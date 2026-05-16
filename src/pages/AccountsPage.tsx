@@ -343,7 +343,13 @@ export default function AccountsPage() {
     setScanError(null)
     try {
       const base64 = await fileToBase64(file)
-      const result = await recognizeImage(base64, file.type)
+      // 30s timeout — if the edge function hangs, fail gracefully
+      const result = await Promise.race([
+        recognizeImage(base64, file.type),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Scan timed out — check your connection or enter details manually')), 30000)
+        ),
+      ])
       const f = result.fields as Record<string, unknown>
       const isBank = result.detectedType === 'bank_statement'
       setForm(p => ({
@@ -360,8 +366,9 @@ export default function AccountsPage() {
       if (!showModal) setShowModal(true)
     } catch (e) {
       setScanError(e instanceof Error ? e.message : 'Scan failed — enter details manually')
+    } finally {
+      setScanning(false)
     }
-    setScanning(false)
   }
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -653,29 +660,33 @@ export default function AccountsPage() {
               </div>
             </div>
 
-            {/* Budget summary pills */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-2 text-xs bg-slate-800/60 rounded-xl px-3 py-2 border border-slate-700/50">
+            {/* Budget formula pills: Budget − Scheduled − Paid = Remaining */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 text-xs bg-slate-800/60 rounded-xl px-3 py-2 border border-slate-700/50">
                 <span className="text-slate-500">Budget</span>
                 <span className={`font-bold ${parseFloat(budgetAmount) > 0 ? 'text-emerald-400' : 'text-slate-600'}`}>
                   {parseFloat(budgetAmount) > 0 ? fmt(parseFloat(budgetAmount)) : 'Not set'}
                 </span>
               </div>
-              <span className="text-slate-600 text-xs">−</span>
-              <div className="flex items-center gap-2 text-xs bg-slate-800/60 rounded-xl px-3 py-2 border border-slate-700/50">
+              <span className="text-slate-600 text-xs font-bold">−</span>
+              <div className="flex items-center gap-1.5 text-xs bg-slate-800/60 rounded-xl px-3 py-2 border border-slate-700/50">
                 <span className="text-slate-500">Scheduled</span>
-                <span className="font-bold text-amber-400">{fmt(totalAllocated)}</span>
-                {totalPaid > 0 && <span className="text-emerald-400 text-xs">(incl. {fmt(totalPaid)} paid)</span>}
+                <span className="font-bold text-amber-400">{fmt(totalDue)}</span>
               </div>
-              <span className="text-slate-600 text-xs">=</span>
-              <div className={`flex items-center gap-2 text-xs rounded-xl px-3 py-2 border font-bold ${
+              <span className="text-slate-600 text-xs font-bold">−</span>
+              <div className="flex items-center gap-1.5 text-xs bg-slate-800/60 rounded-xl px-3 py-2 border border-slate-700/50">
+                <span className="text-slate-500">Paid</span>
+                <span className="font-bold text-sky-400">{fmt(totalPaid)}</span>
+              </div>
+              <span className="text-slate-600 text-xs font-bold">=</span>
+              <div className={`flex items-center gap-1.5 text-xs rounded-xl px-3 py-2 border font-bold ${
                 budgetRemaining == null ? 'bg-slate-800/60 border-slate-700/50 text-slate-500'
                   : budgetRemaining >= 0 ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
                   : 'bg-red-500/10 border-red-500/25 text-red-400'
               }`}>
-                {budgetRemaining != null ? (
-                  <>{budgetRemaining >= 0 ? fmt(budgetRemaining) : `−${fmt(Math.abs(budgetRemaining))}`} remaining</>
-                ) : 'No budget set'}
+                {budgetRemaining != null
+                  ? <>{budgetRemaining >= 0 ? fmt(budgetRemaining) : `−${fmt(Math.abs(budgetRemaining))}`}<span className="font-normal ml-1 opacity-70">remaining</span></>
+                  : 'Set budget in Payday Planner'}
               </div>
 
               {(dueItems.length > 0 || paidThisCycle.length > 0) && (
@@ -780,7 +791,7 @@ export default function AccountsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-800">
-                {['Account', 'Category', 'Type', 'Balance', 'Rate', 'Next Payment', 'Payments Left', ''].map(h => (
+                {['Account', 'Category', 'Type', 'Balance', 'Rate', 'Next Payment', 'Last Payment', 'Payments Left', ''].map(h => (
                   <th key={h} className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400 px-5 py-3">{h}</th>
                 ))}
               </tr>
@@ -863,6 +874,25 @@ export default function AccountsPage() {
                       ) : (
                         <span className="text-xs text-slate-700">—</span>
                       )}
+                    </td>
+
+                    {/* Last Payment column */}
+                    <td className="px-5 py-3">
+                      {(() => {
+                        const lastDate   = isBNPL ? bnplExtras?.last_payment_date : sched?.anchor_date
+                        const lastAmount = isBNPL
+                          ? (bnplExtras?.payment_amount ? parseFloat(bnplExtras.payment_amount) : null)
+                          : sched?.amount ?? null
+                        if (lastDate) {
+                          return (
+                            <div>
+                              <div className="text-xs font-semibold text-sky-400">{lastDate}</div>
+                              {lastAmount != null && <div className="text-xs text-slate-500">{fmt(lastAmount)}</div>}
+                            </div>
+                          )
+                        }
+                        return <span className="text-xs text-slate-700">—</span>
+                      })()}
                     </td>
 
                     {/* Payments Left column */}
