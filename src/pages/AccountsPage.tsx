@@ -224,21 +224,29 @@ export default function AccountsPage() {
     return true
   })
 
+  // ── Map each debt account → its next scheduled payment (must be before dueItems) ──
+  const paymentsByAccount: Record<string, ScheduledPayment> = {}
+  scheduledPayments.forEach(p => {
+    if (p.from_account_id && !paymentsByAccount[p.from_account_id]) {
+      paymentsByAccount[p.from_account_id] = p
+    }
+  })
+
   // ── Stat card calculations (same classifier as Dashboard) ──
   const isDebtAcc = (a: FinancialAccount) => DEBT_TYPES.includes(getDisplayType(a)) || a.current_balance < 0
   const debtAccList  = accounts.filter(isDebtAcc)
   const assetAccList = accounts.filter(a => !isDebtAcc(a) && a.current_balance > 0)
-  const totalAssets = assetAccList.reduce((s, a) => s + a.current_balance, 0)
-  const totalDebt   = debtAccList.reduce((s, a) => s + Math.abs(a.current_balance), 0)
-  const netWorth    = totalAssets - totalDebt
+  const totalAssets  = assetAccList.reduce((s, a) => s + a.current_balance, 0)
+  const totalDebt    = debtAccList.reduce((s, a) => s + Math.abs(a.current_balance), 0)
+  const netWorth     = totalAssets - totalDebt
 
   // ── Payments due before next payday ───────────────────────
   const nextPayday = paydaySettings ? computeNextPayday(paydaySettings.next_payday, paydaySettings.frequency) : null
 
-  const dueItems = nextPayday ? accounts.filter(isDebtAcc).flatMap(a => {
-    const dt      = getDisplayType(a)
-    const extras  = bnplData[a.id]
-    const sched   = paymentsByAccount[a.id]
+  const dueItems = nextPayday ? debtAccList.flatMap(a => {
+    const dt     = getDisplayType(a)
+    const extras = bnplData[a.id]
+    const sched  = paymentsByAccount[a.id]
     let dueDate: string | undefined
     let amount = 0
     if (dt === 'buy_now_pay_later' && extras?.due_date) {
@@ -256,14 +264,6 @@ export default function AccountsPage() {
 
   const totalDue        = dueItems.reduce((s, i) => s + i.amount, 0)
   const budgetRemaining = parseFloat(budgetAmount) > 0 ? parseFloat(budgetAmount) - totalDue : null
-
-  // ── Map each debt account → its next scheduled payment ───────
-  const paymentsByAccount: Record<string, ScheduledPayment> = {}
-  scheduledPayments.forEach(p => {
-    if (p.from_account_id && !paymentsByAccount[p.from_account_id]) {
-      paymentsByAccount[p.from_account_id] = p
-    }
-  })
 
   // ── Open add modal ───────────────────────────────────────────
   const openAdd = () => {
