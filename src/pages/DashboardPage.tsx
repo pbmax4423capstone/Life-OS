@@ -5,7 +5,6 @@ import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/su
 import { useAuthStore } from '@/stores/authStore'
 import { MailWidget } from '@/components/mail/MailWidget'
 import { InvitePanel } from '@/components/shared/InvitePanel'
-
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 const fmtDec = (n: number) =>
@@ -196,15 +195,26 @@ function PaydayPlanner({
 
 // ── Dashboard ─────────────────────────────────────────────────
 export default function DashboardPage() {
-  const { user } = useAuthStore()
+  const { user, profile } = useAuthStore()
   const navigate = useNavigate()
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
   const [payments, setPayments] = useState<ScheduledPayment[]>([])
   const [retirementLoans, setRetirementLoans] = useState<RetirementLoan[]>([])
   const [loading, setLoading] = useState(true)
+  // Seed from localStorage for instant display; will sync from Supabase once profile loads
   const [paydaySettings, setPaydaySettings] = useState<PaydaySettings | null>(loadPayday)
   const [showAssetDrilldown, setShowAssetDrilldown] = useState(false)
   const [show401kDrilldown, setShow401kDrilldown] = useState(false)
+
+  // ── Sync payday settings from Supabase profile preferences ──
+  useEffect(() => {
+    if (!profile) return
+    const saved = (profile.preferences as Record<string, unknown>)?.payday_settings as PaydaySettings | undefined
+    if (saved?.frequency && saved?.next_payday) {
+      setPaydaySettings(saved)
+      savePayday(saved)   // keep localStorage in sync
+    }
+  }, [profile])
 
   useEffect(() => {
     if (!user) { setLoading(false); return }

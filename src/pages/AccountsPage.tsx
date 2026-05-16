@@ -163,9 +163,9 @@ export default function AccountsPage() {
   // ── Tabs ─────────────────────────────────────────────────────
   const tabs = ['All', 'Assets', 'Debt', 'Investments']
   const filtered = accounts.filter(a => {
-    if (tab === 'Assets') return ['checking', 'savings', 'cd'].includes(a.account_type)
-    if (tab === 'Debt') return DEBT_TYPES.includes(a.account_type)
-    if (tab === 'Investments') return ['investment', 'retirement'].includes(a.account_type)
+    if (tab === 'Assets') return getCategory(getDisplayType(a)) === 'asset'
+    if (tab === 'Debt') return getCategory(getDisplayType(a)) === 'debt'
+    if (tab === 'Investments') return getCategory(getDisplayType(a)) === 'investment'
     return true
   })
 
@@ -192,13 +192,13 @@ export default function AccountsPage() {
   // ── Open edit modal ──────────────────────────────────────────
   const openEdit = (a: FinancialAccount) => {
     setEditAccount(a)
-    const cat = getCategory(a.account_type)
+    const cat = getCategory(getDisplayType(a))
+    const displayType = getDisplayType(a)   // may differ from a.account_type for extended types
     const extras = bnplData[a.id]
     setForm({
       accountKind: cat,
       nickname: a.nickname ?? '',
-      account_type: a.account_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-        .replace('Buy Now Pay Later', 'Buy Now Pay Later'),
+      account_type: displayType.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
       institution_name: a.institution_name,
       last_four: a.last_four ?? '',
       current_balance: String(a.current_balance),
@@ -272,9 +272,12 @@ export default function AccountsPage() {
 
     const isBNPL = form.account_type === 'Buy Now Pay Later'
     const typeKey = form.account_type.toLowerCase().replace(/ /g, '_')
+    const dbType = toDbType(typeKey)                    // valid DB enum value
+    const iconValue = EXTENDED_TYPES.has(typeKey)       // store real type in icon
+      ? typeKey : '🏦'
 
     const payload = {
-      account_type: typeKey,
+      account_type: dbType,                             // safe for DB enum
       institution_name: form.institution_name,
       nickname: form.nickname || null,
       last_four: form.last_four || null,
@@ -291,13 +294,13 @@ export default function AccountsPage() {
       // ── Insert or Update base account ──────────────────────
       if (editAccount) {
         const { data, error } = await supabase.from('financial_accounts')
-          .update(payload).eq('id', editAccount.id).select('*').single()
+          .update({ ...payload, icon: iconValue }).eq('id', editAccount.id).select('*').single()
         if (error) throw new Error(error.message)
         if (data) setAccounts(p => p.map(a => a.id === data.id ? data : a))
       } else {
         const { data, error } = await supabase.from('financial_accounts').insert({
           ...payload, owner_id: user.id, status: 'active', sort_order: accounts.length,
-          rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
+          rewards_unit: 'points', rewards_cpp: 0.01, icon: iconValue,
         }).select('*').single()
         if (error) throw new Error(error.message)
         if (data) { setAccounts(p => [...p, data]); accountId = data.id }
@@ -454,10 +457,11 @@ export default function AccountsPage() {
             </thead>
             <tbody>
               {filtered.map(a => {
+                const dt    = getDisplayType(a)
                 const sched = paymentsByAccount[a.id]
                 const bnplExtras = bnplData[a.id]
-                const isDebt = DEBT_TYPES.includes(a.account_type)
-                const isBNPL = a.account_type === 'buy_now_pay_later'
+                const isDebt = DEBT_TYPES.includes(dt)
+                const isBNPL = dt === 'buy_now_pay_later'
 
                 return (
                   <tr key={a.id}
@@ -478,14 +482,14 @@ export default function AccountsPage() {
                     </td>
                     <td className="px-5 py-3">
                       {(() => {
-                        const cat = getCategory(a.account_type)
+                        const cat = getCategory(dt)
                         const cfg = CATEGORY_CONFIG[cat]
                         return <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${cfg.badge}`}>{cfg.label}</span>
                       })()}
                     </td>
                     <td className="px-5 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${typeBadge(a.account_type)}`}>
-                        {typeLabel(a.account_type)}
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${typeBadge(dt)}`}>
+                        {typeLabel(dt)}
                       </span>
                     </td>
                     <td className="px-5 py-3">
