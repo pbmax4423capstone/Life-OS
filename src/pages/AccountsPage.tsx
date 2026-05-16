@@ -384,10 +384,14 @@ export default function AccountsPage() {
         if (error) throw new Error(error.message)
         if (data) setAccounts(p => p.map(a => a.id === data.id ? data : a))
       } else {
-        const { data, error } = await supabase.from('financial_accounts').insert({
+        const insertPromise = supabase.from('financial_accounts').insert({
           ...payload, owner_id: user.id, status: 'active', sort_order: accounts.length,
           rewards_unit: 'points', rewards_cpp: 0.01, icon: iconValue,
         }).select('*').single()
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timed out — check your connection and try again')), 12000)
+        )
+        const { data, error } = await Promise.race([insertPromise, timeoutPromise])
         if (error) throw new Error(error.message)
         if (data) { setAccounts(p => [...p, data]); accountId = data.id }
       }
@@ -405,32 +409,28 @@ export default function AccountsPage() {
         setBnplData(updatedBnpl)
         saveBnpl(updatedBnpl)
 
-        // Create/update the linked ScheduledPayment when payment details are provided
+        // Create/update the linked ScheduledPayment — fire-and-forget so it never blocks the modal
         if (form.bnpl_payment_amount && form.bnpl_due_date) {
-          try {
-            const existing = scheduledPayments.find(p => p.from_account_id === accountId)
-            const pmtPayload = {
-              owner_id: user.id,
-              from_account_id: accountId!,
-              payee_name: form.institution_name,
-              amount: parseFloat(form.bnpl_payment_amount),
-              next_due_date: form.bnpl_due_date,
-              frequency: form.bnpl_interval.toLowerCase().replace(/\s+/g, '_'),
-              auto_pay: form.bnpl_auto_pay,
-              status: 'active',
-              memo: JSON.stringify({ payments_remaining: parseInt(form.bnpl_payments_remaining) || null }),
-            }
-            if (existing) {
-              const { data: updated } = await supabase.from('scheduled_payments')
-                .update(pmtPayload).eq('id', existing.id).select('*').single()
-              if (updated) setScheduledPayments(p => p.map(x => x.id === updated.id ? updated : x))
-            } else {
-              const { data: created } = await supabase.from('scheduled_payments')
-                .insert(pmtPayload).select('*').single()
-              if (created) setScheduledPayments(p => [...p, created])
-            }
-          } catch {
-            // Payment scheduling failed — account still saved; user can schedule in Payments page
+          const existing = scheduledPayments.find(p => p.from_account_id === accountId)
+          const pmtPayload = {
+            owner_id: user.id,
+            from_account_id: accountId!,
+            payee_name: form.institution_name,
+            amount: parseFloat(form.bnpl_payment_amount),
+            next_due_date: form.bnpl_due_date,
+            frequency: form.bnpl_interval.toLowerCase().replace(/\s+/g, '_'),
+            auto_pay: form.bnpl_auto_pay,
+            status: 'active',
+            memo: JSON.stringify({ payments_remaining: parseInt(form.bnpl_payments_remaining) || null }),
+          }
+          if (existing) {
+            supabase.from('scheduled_payments').update(pmtPayload).eq('id', existing.id).select('*').single()
+              .then(({ data: updated }) => { if (updated) setScheduledPayments(p => p.map(x => x.id === updated.id ? updated : x)) })
+              .catch(() => {})
+          } else {
+            supabase.from('scheduled_payments').insert(pmtPayload).select('*').single()
+              .then(({ data: created }) => { if (created) setScheduledPayments(p => [...p, created]) })
+              .catch(() => {})
           }
         }
       }
