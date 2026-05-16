@@ -244,7 +244,16 @@ export default function DashboardPage() {
 
   // ── Derived values ────────────────────────────────────────
   const assets = accounts.filter(a => a.current_balance > 0).reduce((s, a) => s + a.current_balance, 0)
-  const debt = accounts.filter(a => a.current_balance < 0).reduce((s, a) => s + Math.abs(a.current_balance), 0)
+
+  // Debt = any account whose display type is a debt type OR has a negative balance
+  const debtAccounts = accounts.filter(a => {
+    const dt = a.icon && ['buy_now_pay_later','401k_loan','money_market','stocks','bonds','bitcoin','retirement_/_401k','other_investment'].includes(a.icon)
+      ? a.icon : a.account_type
+    const debtDbTypes = ['credit_card','mortgage','auto_loan','student_loan','personal_loan','heloc']
+    const debtIconTypes = ['buy_now_pay_later','401k_loan']
+    return a.current_balance < 0 || debtDbTypes.includes(a.account_type) || debtIconTypes.includes(a.icon ?? '')
+  })
+  const debt = debtAccounts.reduce((s, a) => s + Math.abs(a.current_balance), 0)
   const netWorth = assets - debt
 
   // Savings = savings + money_market + cd accounts
