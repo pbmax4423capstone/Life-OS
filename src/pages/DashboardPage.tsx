@@ -242,41 +242,38 @@ export default function DashboardPage() {
     savePayday(s)
   }
 
-  // ── Derived values ────────────────────────────────────────
-  const assets = accounts.filter(a => a.current_balance > 0).reduce((s, a) => s + a.current_balance, 0)
+  // ── Classify accounts ─────────────────────────────────────────
+  const DEBT_DB   = ['credit_card','mortgage','auto_loan','student_loan','personal_loan','heloc']
+  const DEBT_ICON = ['buy_now_pay_later','401k_loan']
+  const INV_ICON  = ['stocks','bonds','bitcoin','retirement_/_401k','other_investment']
+  const SAV_DB    = ['savings','cd','money_market']
 
-  // Debt = any account whose display type is a debt type OR has a negative balance
-  const debtAccounts = accounts.filter(a => {
-    const dt = a.icon && ['buy_now_pay_later','401k_loan','money_market','stocks','bonds','bitcoin','retirement_/_401k','other_investment'].includes(a.icon)
-      ? a.icon : a.account_type
-    const debtDbTypes = ['credit_card','mortgage','auto_loan','student_loan','personal_loan','heloc']
-    const debtIconTypes = ['buy_now_pay_later','401k_loan']
-    return a.current_balance < 0 || debtDbTypes.includes(a.account_type) || debtIconTypes.includes(a.icon ?? '')
-  })
-  const debt = debtAccounts.reduce((s, a) => s + Math.abs(a.current_balance), 0)
+  const isDebtAcc = (a: FinancialAccount) =>
+    DEBT_DB.includes(a.account_type) || DEBT_ICON.includes(a.icon ?? '') || a.current_balance < 0
+  const isInvAcc = (a: FinancialAccount) =>
+    ['investment'].includes(a.account_type) || INV_ICON.includes(a.icon ?? '')
+  const is401k = (a: FinancialAccount) =>
+    a.account_type === 'retirement' || a.icon === 'retirement_/_401k'
+
+  const debtList  = accounts.filter(isDebtAcc)
+  const assetList = accounts.filter(a => !isDebtAcc(a) && a.current_balance > 0)
+
+  const assets   = assetList.reduce((s, a) => s + a.current_balance, 0)
+  const debt     = debtList.reduce((s, a) => s + Math.abs(a.current_balance), 0)
   const netWorth = assets - debt
 
-  // Savings = savings + money_market + cd accounts
-  const savingsBalance = accounts
-    .filter(a => ['savings', 'money_market', 'cd'].includes(a.account_type))
-    .reduce((s, a) => s + a.current_balance, 0)
-
-  // Investments = non-retirement investment types (stocks, bonds, bitcoin, etc.)
-  const investmentBalance = accounts
-    .filter(a => ['investment', 'stocks', 'bonds', 'bitcoin', 'other_investment'].includes(a.account_type))
-    .reduce((s, a) => s + a.current_balance, 0)
-
-  // 401K = retirement accounts
-  const k401Balance = accounts
-    .filter(a => ['retirement', 'retirement_/_401k'].includes(a.account_type))
-    .reduce((s, a) => s + a.current_balance, 0)
-
-  // 401K Loans total
-  const k401LoanBalance = retirementLoans.reduce((s, l) => s + l.current_balance, 0)
+  const savingsBalance    = accounts.filter(a => SAV_DB.includes(a.account_type) && !isDebtAcc(a))
+    .reduce((s, a) => s + Math.max(0, a.current_balance), 0)
+  const investmentBalance = accounts.filter(a => isInvAcc(a) && !is401k(a) && !isDebtAcc(a))
+    .reduce((s, a) => s + Math.max(0, a.current_balance), 0)
+  const k401Balance       = accounts.filter(a => is401k(a) && !isDebtAcc(a))
+    .reduce((s, a) => s + Math.max(0, a.current_balance), 0)
+  const k401LoanBalance   = retirementLoans.reduce((s, l) => s + l.current_balance, 0)
 
   const checkingBalance = accounts
     .filter(a => a.account_type === 'checking' && a.current_balance > 0)
     .reduce((s, a) => s + a.current_balance, 0)
+  const checkingAccounts = accounts.filter(a => a.account_type === 'checking')
 
   // Bills due before next payday
   const nextPayday = paydaySettings ? nextPaydayFrom(paydaySettings.next_payday, paydaySettings.frequency) : null
@@ -286,8 +283,7 @@ export default function DashboardPage() {
   const totalBillsBeforePayday = billsBeforePayday.reduce((s, p) => s + p.amount, 0)
   const checkingAfterBills = checkingBalance - totalBillsBeforePayday
 
-  // Checking accounts for the accounts list
-  const checkingAccounts = accounts.filter(a => a.account_type === 'checking')
+  // (checkingAccounts already declared above)
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">

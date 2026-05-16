@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   PiggyBank, Plus, Loader2, TrendingDown,
-  Calendar, DollarSign, Sparkles, ChevronDown, ChevronUp, Info
+  Calendar, DollarSign, Sparkles, ChevronDown, ChevronUp, Info, Pencil, Trash2
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
@@ -35,25 +35,27 @@ const fmtDec = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 const fmtPct = (n: number) => `${(n * 100).toFixed(2)}%`
 
-// ── Add loan modal ─────────────────────────────────────────────
-function AddLoanModal({ onSave, onClose, accounts }: {
+// ── Add / Edit loan modal ──────────────────────────────────────
+function AddLoanModal({ onSave, onClose, accounts, initialData }: {
   onSave: (data: Partial<RetirementLoan> & { owner_id: string }) => Promise<void>
   onClose: () => void
   accounts: { id: string; institution_name: string; nickname: string | null }[]
+  initialData?: RetirementLoan
 }) {
   const { user } = useAuthStore()
+  const isEdit = !!initialData
   const [form, setForm] = useState({
-    plan_name: '401(k) Loan',
-    account_id: accounts[0]?.id ?? '',
-    original_amount: '',
-    current_balance: '',
-    interest_rate: '6.5',
-    origination_date: new Date().toISOString().split('T')[0],
-    first_payment_date: '',
-    payoff_date: '',
-    loan_term_months: '60',
-    payment_frequency: 'biweekly',
-    payment_amount: '',
+    plan_name: initialData?.plan_name ?? '401(k) Loan',
+    account_id: initialData?.account_id ?? accounts[0]?.id ?? '',
+    original_amount: initialData ? String(initialData.original_amount) : '',
+    current_balance: initialData ? String(initialData.current_balance) : '',
+    interest_rate: initialData ? String((initialData.interest_rate * 100).toFixed(2)) : '6.5',
+    origination_date: initialData?.origination_date ?? new Date().toISOString().split('T')[0],
+    first_payment_date: initialData?.first_payment_date ?? '',
+    payoff_date: initialData?.payoff_date ?? '',
+    loan_term_months: initialData?.loan_term_months ? String(initialData.loan_term_months) : '60',
+    payment_frequency: initialData?.payment_frequency ?? 'biweekly',
+    payment_amount: initialData ? String(initialData.payment_amount) : '',
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -144,7 +146,7 @@ function AddLoanModal({ onSave, onClose, accounts }: {
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="flex items-center justify-between p-5 border-b border-slate-700">
-          <h3 className="text-base font-semibold text-slate-100">Add 401(k) Loan</h3>
+          <h3 className="text-base font-semibold text-slate-100">{isEdit ? 'Edit Loan' : 'Add 401(k) Loan'}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-200">✕</button>
         </div>
         <div className="p-5 space-y-3">
@@ -196,7 +198,7 @@ function AddLoanModal({ onSave, onClose, accounts }: {
               disabled={saving || !form.original_amount || !form.first_payment_date}
               className="btn-primary flex-1 justify-center"
             >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : 'Save Loan'}
+              {saving ? <Loader2 size={14} className="animate-spin" /> : isEdit ? 'Save Changes' : 'Save Loan'}
             </button>
             <button onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
@@ -213,6 +215,8 @@ export default function RetirementLoanPage() {
   const [retAccounts, setRetAccounts] = useState<{ id: string; institution_name: string; nickname: string | null }[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const [editingLoan, setEditingLoan] = useState<RetirementLoan | null>(null)
+  const [deletingLoan, setDeletingLoan] = useState<RetirementLoan | null>(null)
   const [selectedLoan, setSelectedLoan] = useState<RetirementLoan | null>(null)
   const [showSchedule, setShowSchedule] = useState(false)
   const [showChat, setShowChat] = useState(false)
@@ -231,7 +235,6 @@ export default function RetirementLoanPage() {
   }, [user])
 
   const handleAddLoan = async (data: Partial<RetirementLoan> & { owner_id: string }) => {
-    // Create financial account for the loan if needed
     let accountId = data.account_id
     if (!accountId) {
       const { data: acct } = await supabase.from('financial_accounts').insert({
@@ -274,6 +277,45 @@ export default function RetirementLoanPage() {
       setLoans(prev => [...prev, loan])
       setSelectedLoan(loan)
     }
+  }
+
+  const handleEditLoan = async (data: Partial<RetirementLoan> & { owner_id: string }) => {
+    if (!editingLoan) return
+    const { data: updated } = await supabase.from('retirement_loans')
+      .update({
+        plan_name: data.plan_name,
+        current_balance: data.current_balance,
+        interest_rate: data.interest_rate,
+        payment_amount: data.payment_amount,
+        payment_frequency: data.payment_frequency,
+        payoff_date: data.payoff_date,
+        first_payment_date: data.first_payment_date,
+        origination_date: data.origination_date,
+        loan_term_months: data.loan_term_months,
+      })
+      .eq('id', editingLoan.id)
+      .select('*').single()
+    if (updated) {
+      setLoans(p => p.map(l => l.id === updated.id ? updated as RetirementLoan : l))
+      if (selectedLoan?.id === updated.id) setSelectedLoan(updated as RetirementLoan)
+    }
+    setEditingLoan(null)
+  }
+
+  const handleDeleteLoan = async (loanToDelete: RetirementLoan) => {
+    await supabase.from('retirement_loans')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', loanToDelete.id)
+    // Also soft-delete the linked financial account
+    if (loanToDelete.account_id) {
+      await supabase.from('financial_accounts')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', loanToDelete.account_id)
+    }
+    const remaining = loans.filter(l => l.id !== loanToDelete.id)
+    setLoans(remaining)
+    if (selectedLoan?.id === loanToDelete.id) setSelectedLoan(remaining[0] ?? null)
+    setDeletingLoan(null)
   }
 
   const loan = selectedLoan
@@ -334,15 +376,27 @@ export default function RetirementLoanPage() {
         </div>
       ) : loan ? (
         <>
-          {/* Loan selector */}
-          {loans.length > 1 && (
-            <div className="flex gap-2">
+          {/* Loan selector + edit/delete */}
+          {loans.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
               {loans.map(l => (
                 <button key={l.id} onClick={() => setSelectedLoan(l)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedLoan?.id === l.id ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}>
                   {l.plan_name}
                 </button>
               ))}
+              {loan && (
+                <div className="ml-auto flex items-center gap-1">
+                  <button onClick={() => setEditingLoan(loan)}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 transition-all">
+                    <Pencil size={12} /> Edit
+                  </button>
+                  <button onClick={() => setDeletingLoan(loan)}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition-all">
+                    <Trash2 size={12} /> Delete
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -493,6 +547,45 @@ export default function RetirementLoanPage() {
           onClose={() => setShowAdd(false)}
           accounts={retAccounts}
         />
+      )}
+
+      {/* Edit modal */}
+      {editingLoan && (
+        <AddLoanModal
+          initialData={editingLoan}
+          onSave={handleEditLoan}
+          onClose={() => setEditingLoan(null)}
+          accounts={retAccounts}
+        />
+      )}
+
+      {/* Delete confirmation */}
+      {deletingLoan && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 rounded-xl bg-red-500/15 text-red-400">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-100">Delete Loan</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{deletingLoan.plan_name}</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-400 mb-5">
+              This will permanently remove the loan and its payment schedule. The linked financial account will also be deleted. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleDeleteLoan(deletingLoan)}
+                className="flex-1 flex items-center justify-center gap-2 btn-primary bg-red-600 hover:bg-red-500 text-white"
+              >
+                <Trash2 size={14} /> Delete Loan
+              </button>
+              <button onClick={() => setDeletingLoan(null)} className="btn-ghost">Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
