@@ -1,22 +1,52 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload } from 'lucide-react'
-import { supabase, type FinancialAccount } from '@/lib/supabase'
+import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload, Pencil } from 'lucide-react'
+import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { recognizeImage } from '@/lib/imageRecognition'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)
 
-const ACCOUNT_TYPES = ['Checking', 'Savings', 'Credit Card', 'Mortgage', 'Auto Loan',
-  'Student Loan', 'Investment', 'Retirement', 'CD', 'Other']
+const ACCOUNT_TYPES = [
+  'Checking', 'Savings', 'Credit Card', 'Buy Now Pay Later',
+  'Mortgage', 'Auto Loan', 'Student Loan', 'Investment', 'Retirement', 'CD', 'Other',
+]
+const DEBT_TYPES = ['credit_card', 'buy_now_pay_later', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan']
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
+const INTERVALS = ['Weekly', 'Biweekly', 'Semi-Monthly', 'Monthly', 'Quarterly']
 
+// ── BNPL localStorage helpers ────────────────────────────────
+interface BNPLExtras {
+  payment_amount: string
+  payment_interval: string
+  due_date: string
+  auto_pay: boolean
+  payments_remaining: string
+}
+function loadBnpl(): Record<string, BNPLExtras> {
+  try { return JSON.parse(localStorage.getItem('life_os_bnpl') ?? '{}') } catch { return {} }
+}
+function saveBnpl(data: Record<string, BNPLExtras>) {
+  localStorage.setItem('life_os_bnpl', JSON.stringify(data))
+}
+
+// ── Type badge helper ────────────────────────────────────────
 function typeBadge(t: string) {
-  if (['checking', 'savings', 'cd'].includes(t)) return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
-  if (t === 'credit_card') return 'bg-amber-500/15 text-amber-400 border border-amber-500/25'
-  if (['mortgage', 'auto_loan', 'student_loan', 'personal_loan'].includes(t)) return 'bg-red-500/15 text-red-400 border border-red-500/25'
-  if (['investment', 'retirement'].includes(t)) return 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/25'
-  return 'bg-slate-700/50 text-slate-400 border border-slate-600/50'
+  if (['checking', 'savings', 'cd'].includes(t)) return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
+  if (t === 'credit_card') return 'bg-amber-500/15 text-amber-400 border-amber-500/25'
+  if (t === 'buy_now_pay_later') return 'bg-purple-500/15 text-purple-400 border-purple-500/25'
+  if (['mortgage', 'auto_loan', 'student_loan', 'personal_loan'].includes(t)) return 'bg-red-500/15 text-red-400 border-red-500/25'
+  if (['investment', 'retirement'].includes(t)) return 'bg-indigo-500/15 text-indigo-400 border-indigo-500/25'
+  return 'bg-slate-700/50 text-slate-400 border-slate-600/50'
+}
+
+function typeLabel(t: string) {
+  const map: Record<string, string> = {
+    buy_now_pay_later: 'BNPL', credit_card: 'Credit Card', auto_loan: 'Auto Loan',
+    student_loan: 'Student Loan', checking: 'Checking', savings: 'Savings',
+    investment: 'Investment', retirement: 'Retirement',
+  }
+  return map[t] ?? t.replace(/_/g, ' ')
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -32,28 +62,95 @@ const BLANK_FORM = {
   nickname: '', account_type: 'Checking', institution_name: '',
   last_four: '', current_balance: '', interest_rate: '', credit_limit: '',
   rewards_balance: '', color: COLORS[0],
+  // BNPL extras
+  bnpl_payment_amount: '', bnpl_interval: 'Monthly', bnpl_due_date: '',
+  bnpl_auto_pay: false, bnpl_payments_remaining: '',
 }
+
+type FormState = typeof BLANK_FORM
 
 export default function AccountsPage() {
   const { user } = useAuthStore()
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
+  const [scheduledPayments, setScheduledPayments] = useState<ScheduledPayment[]>([])
   const [loading, setLoading] = useState(true)
-  const [showAdd, setShowAdd] = useState(false)
+  const [showModal, setShowModal] = useState(false)
+  const [editAccount, setEditAccount] = useState<FinancialAccount | null>(null)
   const [saving, setSaving] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
   const [tab, setTab] = useState('All')
-  const [form, setForm] = useState(BLANK_FORM)
+  const [form, setForm] = useState<FormState>(BLANK_FORM)
+  const [bnplData, setBnplData] = useState<Record<string, BNPLExtras>>(loadBnpl)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
-    supabase.from('financial_accounts').select('*')
-      .eq('owner_id', user.id).is('deleted_at', null).order('sort_order')
-      .then(({ data }) => { setAccounts(data ?? []); setLoading(false) })
+    Promise.all([
+      supabase.from('financial_accounts').select('*').eq('owner_id', user.id).is('deleted_at', null).order('sort_order'),
+      supabase.from('scheduled_payments').select('*').eq('owner_id', user.id).is('deleted_at', null).order('next_due_date'),
+    ]).then(([{ data: accs }, { data: pmts }]) => {
+      setAccounts(accs ?? [])
+      setScheduledPayments(pmts ?? [])
+      setLoading(false)
+    })
   }, [user])
 
-  // ── AI scan: process image → pre-fill form ────────────────
+  // ── Tabs ─────────────────────────────────────────────────────
+  const tabs = ['All', 'Assets', 'Debt', 'Investments']
+  const filtered = accounts.filter(a => {
+    if (tab === 'Assets') return ['checking', 'savings', 'cd'].includes(a.account_type)
+    if (tab === 'Debt') return DEBT_TYPES.includes(a.account_type)
+    if (tab === 'Investments') return ['investment', 'retirement'].includes(a.account_type)
+    return true
+  })
+
+  const totalAssets = accounts.filter(a => a.current_balance > 0).reduce((s, a) => s + a.current_balance, 0)
+  const totalDebt = accounts.filter(a => a.current_balance < 0).reduce((s, a) => s + Math.abs(a.current_balance), 0)
+  const netWorth = totalAssets - totalDebt
+
+  // ── Map each debt account → its next scheduled payment ───────
+  const paymentsByAccount: Record<string, ScheduledPayment> = {}
+  scheduledPayments.forEach(p => {
+    if (p.from_account_id && !paymentsByAccount[p.from_account_id]) {
+      paymentsByAccount[p.from_account_id] = p
+    }
+  })
+
+  // ── Open add modal ───────────────────────────────────────────
+  const openAdd = () => {
+    setEditAccount(null)
+    setForm(BLANK_FORM)
+    setScanError(null)
+    setShowModal(true)
+  }
+
+  // ── Open edit modal ──────────────────────────────────────────
+  const openEdit = (a: FinancialAccount) => {
+    setEditAccount(a)
+    const extras = bnplData[a.id]
+    setForm({
+      nickname: a.nickname ?? '',
+      account_type: a.account_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+        .replace('Buy Now Pay Later', 'Buy Now Pay Later'),
+      institution_name: a.institution_name,
+      last_four: a.last_four ?? '',
+      current_balance: String(a.current_balance),
+      interest_rate: a.interest_rate != null ? String(a.interest_rate) : '',
+      credit_limit: a.credit_limit != null ? String(a.credit_limit) : '',
+      rewards_balance: String(a.rewards_balance),
+      color: a.color,
+      bnpl_payment_amount: extras?.payment_amount ?? '',
+      bnpl_interval: extras?.payment_interval ?? 'Monthly',
+      bnpl_due_date: extras?.due_date ?? '',
+      bnpl_auto_pay: extras?.auto_pay ?? false,
+      bnpl_payments_remaining: extras?.payments_remaining ?? '',
+    })
+    setScanError(null)
+    setShowModal(true)
+  }
+
+  // ── AI scan → pre-fill ───────────────────────────────────────
   const scanImage = async (file: File) => {
     setScanning(true)
     setScanError(null)
@@ -61,26 +158,21 @@ export default function AccountsPage() {
       const base64 = await fileToBase64(file)
       const result = await recognizeImage(base64, file.type)
       const f = result.fields as Record<string, unknown>
-
       const isBank = result.detectedType === 'bank_statement'
-      const isCreditCard = result.detectedType === 'credit_card_statement'
-
-      setForm({
-        institution_name: String(f.institution ?? ''),
-        nickname: '',
-        account_type: isBank
-          ? (String(f.account_type ?? 'checking').charAt(0).toUpperCase() + String(f.account_type ?? 'checking').slice(1))
-          : isCreditCard ? 'Credit Card' : 'Checking',
-        last_four: String(f.last_four ?? ''),
-        current_balance: f.balance != null ? String(f.balance) : '',
-        interest_rate: f.apr != null ? String(f.apr) : '',
-        credit_limit: f.credit_limit != null ? String(f.credit_limit) : '',
-        rewards_balance: f.rewards_points != null ? String(f.rewards_points) : '',
-        color: isCreditCard ? '#f59e0b' : isBank ? '#10b981' : COLORS[0],
-      })
-      setShowAdd(true)
+      setForm(p => ({
+        ...p,
+        institution_name: String(f.institution ?? p.institution_name),
+        account_type: isBank ? 'Checking' : 'Credit Card',
+        last_four: String(f.last_four ?? p.last_four),
+        current_balance: f.balance != null ? String(f.balance) : p.current_balance,
+        interest_rate: f.apr != null ? String(f.apr) : p.interest_rate,
+        credit_limit: f.credit_limit != null ? String(f.credit_limit) : p.credit_limit,
+        rewards_balance: f.rewards_points != null ? String(f.rewards_points) : p.rewards_balance,
+        color: isBank ? '#10b981' : '#f59e0b',
+      }))
+      if (!showModal) setShowModal(true)
     } catch (e) {
-      setScanError(e instanceof Error ? e.message : 'Scan failed — try again or enter details manually')
+      setScanError(e instanceof Error ? e.message : 'Scan failed — enter details manually')
     }
     setScanning(false)
   }
@@ -91,7 +183,6 @@ export default function AccountsPage() {
     e.target.value = ''
   }
 
-  // Paste inside the modal's paste zone (stop propagation so global handler doesn't fire)
   const handleModalPaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items
     if (!items) return
@@ -105,47 +196,91 @@ export default function AccountsPage() {
     }
   }
 
-  // ── Account CRUD ──────────────────────────────────────────
-  const tabs = ['All', 'Assets', 'Debt', 'Investments']
-  const filtered = accounts.filter(a => {
-    if (tab === 'Assets') return ['checking', 'savings', 'cd'].includes(a.account_type)
-    if (tab === 'Debt') return ['credit_card', 'mortgage', 'auto_loan', 'student_loan'].includes(a.account_type)
-    if (tab === 'Investments') return ['investment', 'retirement'].includes(a.account_type)
-    return true
-  })
-
-  const totalAssets = accounts.filter(a => a.current_balance > 0).reduce((s, a) => s + a.current_balance, 0)
-  const totalDebt = accounts.filter(a => a.current_balance < 0).reduce((s, a) => s + Math.abs(a.current_balance), 0)
-  const netWorth = totalAssets - totalDebt
-
-  const add = async () => {
+  // ── Save (insert or update) ──────────────────────────────────
+  const save = async () => {
     if (!user || !form.institution_name) return
     setSaving(true)
+    const isBNPL = form.account_type === 'Buy Now Pay Later'
     const typeKey = form.account_type.toLowerCase().replace(/ /g, '_')
-    const { data, error } = await supabase.from('financial_accounts').insert({
-      owner_id: user.id,
+
+    const payload = {
       account_type: typeKey,
       institution_name: form.institution_name,
       nickname: form.nickname || null,
       last_four: form.last_four || null,
       current_balance: parseFloat(form.current_balance) || 0,
-      interest_rate: parseFloat(form.interest_rate) || null,
-      credit_limit: parseFloat(form.credit_limit) || null,
+      interest_rate: form.interest_rate ? parseFloat(form.interest_rate) : null,
+      credit_limit: form.credit_limit ? parseFloat(form.credit_limit) : null,
       rewards_balance: parseFloat(form.rewards_balance) || 0,
       color: form.color,
-      status: 'active', sort_order: accounts.length,
-      rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
-    }).select('*').single()
-    if (!error && data) setAccounts(p => [...p, data])
+    }
+
+    let accountId = editAccount?.id
+    if (editAccount) {
+      const { data } = await supabase.from('financial_accounts').update(payload).eq('id', editAccount.id).select('*').single()
+      if (data) setAccounts(p => p.map(a => a.id === data.id ? data : a))
+    } else {
+      const { data } = await supabase.from('financial_accounts').insert({
+        ...payload, owner_id: user.id, status: 'active', sort_order: accounts.length,
+        rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
+      }).select('*').single()
+      if (data) { setAccounts(p => [...p, data]); accountId = data.id }
+    }
+
+    // Save BNPL extras to localStorage
+    if (isBNPL && accountId) {
+      const extras: BNPLExtras = {
+        payment_amount: form.bnpl_payment_amount,
+        payment_interval: form.bnpl_interval,
+        due_date: form.bnpl_due_date,
+        auto_pay: form.bnpl_auto_pay,
+        payments_remaining: form.bnpl_payments_remaining,
+      }
+      const updated = { ...bnplData, [accountId]: extras }
+      setBnplData(updated)
+      saveBnpl(updated)
+
+      // Create/update a ScheduledPayment linked to this account
+      if (form.bnpl_payment_amount && form.bnpl_due_date && accountId) {
+        const existing = scheduledPayments.find(p => p.from_account_id === accountId)
+        const pmtPayload = {
+          owner_id: user.id,
+          from_account_id: accountId,
+          payee_name: form.institution_name,
+          amount: parseFloat(form.bnpl_payment_amount),
+          next_due_date: form.bnpl_due_date,
+          frequency: form.bnpl_interval.toLowerCase().replace('-', '_'),
+          auto_pay: form.bnpl_auto_pay,
+          status: 'active',
+          memo: JSON.stringify({ payments_remaining: parseInt(form.bnpl_payments_remaining) || null }),
+        }
+        if (existing) {
+          const { data: updated } = await supabase.from('scheduled_payments').update(pmtPayload).eq('id', existing.id).select('*').single()
+          if (updated) setScheduledPayments(p => p.map(x => x.id === updated.id ? updated : x))
+        } else {
+          const { data: created } = await supabase.from('scheduled_payments').insert(pmtPayload).select('*').single()
+          if (created) setScheduledPayments(p => [...p, created])
+        }
+      }
+    }
+
     setSaving(false)
-    setShowAdd(false)
+    setShowModal(false)
+    setEditAccount(null)
     setForm(BLANK_FORM)
   }
 
-  const del = async (id: string) => {
+  const del = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
     await supabase.from('financial_accounts').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     setAccounts(p => p.filter(a => a.id !== id))
+    const updated = { ...bnplData }
+    delete updated[id]
+    setBnplData(updated)
+    saveBnpl(updated)
   }
+
+  const isBNPLForm = form.account_type === 'Buy Now Pay Later'
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -155,7 +290,6 @@ export default function AccountsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Hidden file input */}
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
 
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -166,23 +300,18 @@ export default function AccountsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={scanning}
-            className="btn-ghost flex items-center gap-2 border border-slate-700"
-          >
-            {scanning
-              ? <><Loader2 size={15} className="animate-spin text-brand-400" /> Scanning…</>
-              : <><ScanLine size={15} className="text-brand-400" /> Import Snip</>}
+          <button onClick={() => fileInputRef.current?.click()} disabled={scanning}
+            className="btn-ghost flex items-center gap-2 border border-slate-700">
+            {scanning ? <><Loader2 size={15} className="animate-spin text-brand-400" /> Scanning…</> : <><ScanLine size={15} className="text-brand-400" /> Import Snip</>}
           </button>
-          <button onClick={() => { setForm(BLANK_FORM); setScanError(null); setShowAdd(true) }} className="btn-primary flex items-center gap-2">
+          <button onClick={openAdd} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Account
           </button>
         </div>
       </div>
 
       {scanError && (
-        <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2.5 flex items-center gap-2">
+        <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2.5">
           <span className="font-medium">Scan error:</span> {scanError}
         </div>
       )}
@@ -219,7 +348,7 @@ export default function AccountsPage() {
               className="btn-ghost flex items-center gap-2 border border-slate-700">
               <ScanLine size={15} className="text-brand-400" /> Import Snip
             </button>
-            <button onClick={() => { setForm(BLANK_FORM); setShowAdd(true) }} className="btn-primary flex items-center gap-2">
+            <button onClick={openAdd} className="btn-primary flex items-center gap-2">
               <Plus size={14} /> Add Manually
             </button>
           </div>
@@ -229,102 +358,144 @@ export default function AccountsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-800">
-                {['Account', 'Type', 'Balance', 'Rate', 'Rewards', ''].map(h => (
+                {['Account', 'Type', 'Balance', 'Rate', 'Next Payment', 'Rewards / Info', ''].map(h => (
                   <th key={h} className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400 px-5 py-3">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map(a => (
-                <tr key={a.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors last:border-0">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-2 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
-                      <div>
-                        <div className="font-medium text-slate-200">{a.nickname ?? a.institution_name}</div>
-                        <div className="text-xs text-slate-500">{a.institution_name}{a.last_four ? ` ···${a.last_four}` : ''}</div>
+              {filtered.map(a => {
+                const sched = paymentsByAccount[a.id]
+                const bnplExtras = bnplData[a.id]
+                const isDebt = DEBT_TYPES.includes(a.account_type)
+                const isBNPL = a.account_type === 'buy_now_pay_later'
+
+                return (
+                  <tr key={a.id}
+                    className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors last:border-0 cursor-pointer"
+                    onClick={() => openEdit(a)}
+                  >
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
+                        <div>
+                          <div className="font-medium text-slate-200 flex items-center gap-1.5">
+                            {a.nickname ?? a.institution_name}
+                            <Pencil size={11} className="text-slate-600 opacity-0 group-hover:opacity-100" />
+                          </div>
+                          <div className="text-xs text-slate-500">{a.institution_name}{a.last_four ? ` ···${a.last_four}` : ''}</div>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeBadge(a.account_type)}`}>
-                      {a.account_type.replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <div className={`font-semibold ${a.current_balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {fmt(Math.abs(a.current_balance))}
-                    </div>
-                    {a.credit_limit && <div className="text-xs text-slate-500">Limit: {fmt(a.credit_limit)}</div>}
-                  </td>
-                  <td className="px-5 py-3 text-slate-300">{a.interest_rate ? `${a.interest_rate}%` : '—'}</td>
-                  <td className="px-5 py-3 text-slate-300">{a.rewards_balance > 0 ? `${a.rewards_balance.toLocaleString()} pts` : '—'}</td>
-                  <td className="px-5 py-3">
-                    <button onClick={() => del(a.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
-                      <Trash2 size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${typeBadge(a.account_type)}`}>
+                        {typeLabel(a.account_type)}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className={`font-semibold ${a.current_balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {fmt(Math.abs(a.current_balance))}
+                      </div>
+                      {a.credit_limit && !isBNPL && <div className="text-xs text-slate-500">Limit: {fmt(a.credit_limit)}</div>}
+                    </td>
+                    <td className="px-5 py-3 text-slate-300">{a.interest_rate ? `${a.interest_rate}%` : '—'}</td>
+
+                    {/* Next Payment column — only meaningful for debt */}
+                    <td className="px-5 py-3">
+                      {isBNPL && bnplExtras?.due_date ? (
+                        <div>
+                          <div className="text-xs font-semibold text-purple-400">{bnplExtras.due_date}</div>
+                          <div className="text-xs text-slate-500">{bnplExtras.payment_interval} · {bnplExtras.payment_amount ? fmt(parseFloat(bnplExtras.payment_amount)) : '—'}</div>
+                        </div>
+                      ) : isDebt && sched ? (
+                        <div>
+                          <div className="text-xs font-semibold text-amber-400">{sched.next_due_date}</div>
+                          <div className="text-xs text-slate-500 capitalize">{sched.frequency} · {fmt(sched.amount)}</div>
+                        </div>
+                      ) : isDebt ? (
+                        <span className="text-xs text-slate-600">Not scheduled</span>
+                      ) : (
+                        <span className="text-xs text-slate-700">—</span>
+                      )}
+                    </td>
+
+                    {/* Rewards / BNPL info column */}
+                    <td className="px-5 py-3">
+                      {isBNPL ? (
+                        <div className="space-y-0.5">
+                          {bnplExtras?.payments_remaining && (
+                            <div className="text-xs font-semibold text-purple-300">
+                              {bnplExtras.payments_remaining} payments left
+                            </div>
+                          )}
+                          {bnplExtras?.auto_pay && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Auto-Pay On</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-300 text-xs">
+                          {a.rewards_balance > 0 ? `${a.rewards_balance.toLocaleString()} pts` : '—'}
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
+                      <button onClick={e => del(a.id, e)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       )}
 
-      {/* Add / Edit modal */}
-      {showAdd && (
+      {/* ── Add / Edit Modal ── */}
+      {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
-
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
             <h3 className="text-lg font-bold text-slate-100 mb-4">
-              {form.institution_name ? 'Review Scanned Account' : 'Add Account'}
+              {editAccount ? `Edit — ${editAccount.nickname ?? editAccount.institution_name}` : 'Add Account'}
             </h3>
 
-            {/* ── Paste / drop zone ── */}
-            <div
-              className={`mb-5 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all group
-                ${scanning
-                  ? 'border-brand-500/60 bg-brand-500/5'
-                  : 'border-slate-700 hover:border-brand-500/50 hover:bg-brand-500/5'}`}
-              onClick={() => !scanning && fileInputRef.current?.click()}
-              onPaste={handleModalPaste}
-              // Make focusable so keyboard paste lands here
-              tabIndex={0}
-              onKeyDown={e => e.key === 'Enter' && !scanning && fileInputRef.current?.click()}
-            >
-              {scanning ? (
-                <div className="flex items-center justify-center gap-2 text-brand-400">
-                  <Loader2 size={18} className="animate-spin" />
-                  <span className="text-sm font-medium">Scanning with AI…</span>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center justify-center gap-2 text-slate-400 group-hover:text-brand-400 transition-colors mb-1">
-                    <ScanLine size={18} />
-                    <span className="text-sm font-medium">Paste or click to import a screenshot</span>
+            {/* Paste / scan zone (only in add mode) */}
+            {!editAccount && (
+              <div
+                className={`mb-5 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all
+                  ${scanning ? 'border-brand-500/60 bg-brand-500/5' : 'border-slate-700 hover:border-brand-500/50 hover:bg-brand-500/5'}`}
+                onClick={() => !scanning && fileInputRef.current?.click()}
+                onPaste={handleModalPaste}
+                tabIndex={0}
+              >
+                {scanning ? (
+                  <div className="flex items-center justify-center gap-2 text-brand-400">
+                    <Loader2 size={16} className="animate-spin" />
+                    <span className="text-sm font-medium">Scanning with AI…</span>
                   </div>
-                  <p className="text-xs text-slate-600">
-                    Bank statement · Credit card statement · Any account summary
-                  </p>
-                  <p className="text-xs text-slate-700 mt-1">
-                    Ctrl+V / ⌘+V while focused here · or click to browse
-                  </p>
-                </>
-              )}
-            </div>
-
-            {scanError && (
-              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mb-4">
-                {scanError}
-              </p>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-center gap-2 text-slate-400 hover:text-brand-400 mb-1">
+                      <ScanLine size={16} />
+                      <span className="text-sm font-medium">Paste or click to scan a statement screenshot</span>
+                    </div>
+                    <p className="text-xs text-slate-600">Bank statement · Credit card · Any account summary</p>
+                  </>
+                )}
+              </div>
             )}
 
-            {/* ── Form fields ── */}
+            {scanError && (
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mb-4">{scanError}</p>
+            )}
+
+            {/* Base fields */}
             <div className="space-y-4">
               <div>
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Institution Name *</label>
                 <input value={form.institution_name} onChange={e => setForm(p => ({ ...p, institution_name: e.target.value }))}
-                  className="input-base" placeholder="Chase, Ally, Wells Fargo…" />
+                  className="input-base" placeholder="Chase, Afterpay, Klarna…" />
               </div>
               <div>
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Nickname (optional)</label>
@@ -339,7 +510,9 @@ export default function AccountsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 font-medium mb-1.5 block">Balance ($)</label>
+                  <label className="text-xs text-slate-400 font-medium mb-1.5 block">
+                    {isBNPLForm ? 'Remaining Balance ($)' : 'Balance ($)'}
+                  </label>
                   <input type="number" value={form.current_balance} onChange={e => setForm(p => ({ ...p, current_balance: e.target.value }))}
                     className="input-base" placeholder="0.00" />
                 </div>
@@ -355,12 +528,65 @@ export default function AccountsPage() {
                   <input maxLength={4} value={form.last_four} onChange={e => setForm(p => ({ ...p, last_four: e.target.value }))}
                     className="input-base" placeholder="0000" />
                 </div>
-                <div>
-                  <label className="text-xs text-slate-400 font-medium mb-1.5 block">Credit Limit ($)</label>
-                  <input type="number" value={form.credit_limit} onChange={e => setForm(p => ({ ...p, credit_limit: e.target.value }))}
-                    className="input-base" placeholder="Optional" />
-                </div>
+                {!isBNPLForm && (
+                  <div>
+                    <label className="text-xs text-slate-400 font-medium mb-1.5 block">Credit Limit ($)</label>
+                    <input type="number" value={form.credit_limit} onChange={e => setForm(p => ({ ...p, credit_limit: e.target.value }))}
+                      className="input-base" placeholder="Optional" />
+                  </div>
+                )}
               </div>
+
+              {/* BNPL-specific fields */}
+              {isBNPLForm && (
+                <div className="space-y-4 pt-3 border-t border-slate-800">
+                  <div className="text-xs font-semibold text-purple-400 uppercase tracking-wide">Buy Now Pay Later Details</div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Amount ($)</label>
+                      <input type="number" value={form.bnpl_payment_amount}
+                        onChange={e => setForm(p => ({ ...p, bnpl_payment_amount: e.target.value }))}
+                        className="input-base" placeholder="0.00" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Interval</label>
+                      <select value={form.bnpl_interval} onChange={e => setForm(p => ({ ...p, bnpl_interval: e.target.value }))} className="input-base">
+                        {INTERVALS.map(i => <option key={i}>{i}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">Next Due Date</label>
+                      <input type="date" value={form.bnpl_due_date}
+                        onChange={e => setForm(p => ({ ...p, bnpl_due_date: e.target.value }))}
+                        className="input-base" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payments Remaining</label>
+                      <input type="number" min={0} value={form.bnpl_payments_remaining}
+                        onChange={e => setForm(p => ({ ...p, bnpl_payments_remaining: e.target.value }))}
+                        className="input-base" placeholder="e.g. 4" />
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl bg-slate-800/60 border border-slate-700/50">
+                    <input type="checkbox" checked={form.bnpl_auto_pay}
+                      onChange={e => setForm(p => ({ ...p, bnpl_auto_pay: e.target.checked }))}
+                      className="rounded accent-brand-500 w-4 h-4" />
+                    <div>
+                      <div className="text-sm font-medium text-slate-200">Auto-Pay Enabled</div>
+                      <div className="text-xs text-slate-500 mt-0.5">Payments are automatically deducted on the due date</div>
+                    </div>
+                    {form.bnpl_auto_pay && (
+                      <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">On</span>
+                    )}
+                  </label>
+                </div>
+              )}
+
               <div>
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Color</label>
                 <div className="flex gap-2 flex-wrap">
@@ -374,20 +600,19 @@ export default function AccountsPage() {
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={add} disabled={saving || !form.institution_name || scanning} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Account'}
+              <button onClick={save} disabled={saving || !form.institution_name || scanning}
+                className="btn-primary flex-1 justify-center flex items-center gap-2">
+                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editAccount ? 'Save Changes' : 'Save Account'}
               </button>
-              <button onClick={() => { setShowAdd(false); setScanError(null) }} className="btn-ghost">Cancel</button>
+              <button onClick={() => { setShowModal(false); setEditAccount(null) }} className="btn-ghost">Cancel</button>
             </div>
 
-            {/* Re-scan shortcut inside modal */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={scanning}
-              className="w-full mt-3 flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-brand-400 transition-colors py-1"
-            >
-              <Upload size={12} /> Browse for a different screenshot
-            </button>
+            {!editAccount && (
+              <button onClick={() => fileInputRef.current?.click()} disabled={scanning}
+                className="w-full mt-3 flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-brand-400 transition-colors py-1">
+                <Upload size={12} /> Browse for a different screenshot
+              </button>
+            )}
           </div>
         </div>
       )}
