@@ -409,7 +409,7 @@ export default function AccountsPage() {
       const result = await Promise.race([
         recognizeImage(base64, file.type),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Scan timed out — check your connection or enter details manually')), 30000)
+          setTimeout(() => reject(new Error('Scan timed out — check your connection or enter details manually')), 60000)
         ),
       ])
       const f = result.fields as Record<string, unknown>
@@ -495,7 +495,7 @@ export default function AccountsPage() {
           rewards_unit: 'points', rewards_cpp: 0.01, icon: iconValue,
         }).select('*').single()
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Request timed out — check your connection and try again')), 12000)
+          setTimeout(() => reject(new Error('Request timed out — check your connection and try again')), 30000)
         )
         const { data, error } = await Promise.race([insertPromise, timeoutPromise])
         if (error) throw new Error(error.message)
