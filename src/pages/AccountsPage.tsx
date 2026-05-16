@@ -298,7 +298,11 @@ export default function AccountsPage() {
       dueDate = sched.next_due_date
       amount  = sched.amount
     }
-    if (dueDate && dueDate <= nextPayday! && amount > 0) {
+    if (!dueDate || !amount) return []
+    // Skip if the payment was already made on or after the due date this cycle
+    const lastPaid = extras?.last_payment_date ?? sched?.anchor_date
+    if (lastPaid && lastPaid >= dueDate) return []
+    if (dueDate <= nextPayday! && amount > 0) {
       return [{ account: a, dueDate, amount, extras, sched }]
     }
     return []
@@ -619,6 +623,24 @@ export default function AccountsPage() {
       setScheduledPayments(p => p.map(x =>
         x.id === sched.id ? { ...x, next_due_date: nextDue, anchor_date: payNowDate } : x
       ))
+    } else {
+      // No existing scheduled payment — create one as a payment record so it shows in Payments tab
+      const dt = getDisplayType(payNowAccount)
+      const extras = bnplData[payNowAccount.id]
+      supabase.from('scheduled_payments').insert({
+        owner_id: user!.id,
+        from_account_id: payNowAccount.id,
+        payee_name: payNowAccount.nickname ?? payNowAccount.institution_name,
+        amount: amount,
+        next_due_date: extras?.due_date ?? payNowDate,
+        frequency: extras?.payment_interval?.toLowerCase().replace(/\s+/g, '_') ?? 'monthly',
+        auto_pay: extras?.auto_pay ?? false,
+        status: 'paid',
+        anchor_date: payNowDate,
+        memo: JSON.stringify({ date_paid: payNowDate, amount_paid: payNowAmount }),
+      }).select('*').single()
+        .then(({ data }) => { if (data) setScheduledPayments(p => [...p, data]) })
+        .catch(() => {})
     }
 
     setPayingNow(false)
