@@ -181,6 +181,8 @@ export default function AccountsPage() {
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
   const [tab, setTab] = useState('All')
+  const [sortKey, setSortKey] = useState<string>('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [form, setForm] = useState<FormState>(BLANK_FORM)
   const [bnplData, setBnplData] = useState<Record<string, BNPLExtras>>(loadBnpl)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -222,11 +224,42 @@ export default function AccountsPage() {
 
   // ── Tabs ─────────────────────────────────────────────────────
   const tabs = ['All', 'Assets', 'Debt', 'Investments']
-  const filtered = accounts.filter(a => {
+  const tabFiltered = accounts.filter(a => {
     if (tab === 'Assets') return getCategory(getDisplayType(a)) === 'asset'
     if (tab === 'Debt') return getCategory(getDisplayType(a)) === 'debt'
     if (tab === 'Investments') return getCategory(getDisplayType(a)) === 'investment'
     return true
+  })
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('asc') }
+  }
+
+  const getSortValue = (a: FinancialAccount): string | number => {
+    const dt     = getDisplayType(a)
+    const extras = bnplData[a.id]
+    const sched  = paymentsByAccount[a.id]
+    switch (sortKey) {
+      case 'name':     return (a.nickname ?? a.institution_name).toLowerCase()
+      case 'category': return getCategory(dt)
+      case 'type':     return typeLabel(dt)
+      case 'balance':  return Math.abs(a.current_balance)
+      case 'rate':     return a.interest_rate ?? -1
+      case 'next':     return (dt === 'buy_now_pay_later' ? extras?.due_date : sched?.next_due_date) ?? 'zzz'
+      case 'last':     return (extras?.last_payment_date ?? sched?.anchor_date) ?? 'zzz'
+      case 'left':     return parseInt(extras?.payments_remaining ?? '999') || 999
+      default:         return ''
+    }
+  }
+
+  const filtered = [...tabFiltered].sort((a, b) => {
+    const va = getSortValue(a)
+    const vb = getSortValue(b)
+    const cmp = typeof va === 'number' && typeof vb === 'number'
+      ? va - vb
+      : String(va).localeCompare(String(vb))
+    return sortDir === 'asc' ? cmp : -cmp
   })
 
   // ── Map each debt account → its next scheduled payment (must be before dueItems) ──
@@ -789,8 +822,34 @@ export default function AccountsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-800">
-                {['Account', 'Category', 'Type', 'Balance', 'Rate', 'Next Payment', 'Last Payment', 'Payments Left', ''].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400 px-5 py-3">{h}</th>
+                {[
+                  { label: 'Account',       key: 'name'     },
+                  { label: 'Category',      key: 'category' },
+                  { label: 'Type',          key: 'type'     },
+                  { label: 'Balance',       key: 'balance'  },
+                  { label: 'Rate',          key: 'rate'     },
+                  { label: 'Next Payment',  key: 'next'     },
+                  { label: 'Last Payment',  key: 'last'     },
+                  { label: 'Payments Left', key: 'left'     },
+                  { label: '',              key: ''         },
+                ].map(({ label, key }) => (
+                  <th
+                    key={label}
+                    onClick={() => key && handleSort(key)}
+                    className={`text-left text-xs font-semibold uppercase tracking-wide text-slate-400 px-5 py-3 select-none ${key ? 'cursor-pointer hover:text-slate-200 transition-colors' : ''}`}
+                  >
+                    {label && (
+                      <span className="inline-flex items-center gap-1">
+                        {label}
+                        {key && sortKey === key && (
+                          <span className="text-brand-400">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                        {key && sortKey !== key && (
+                          <span className="text-slate-700 opacity-0 group-hover:opacity-100">↕</span>
+                        )}
+                      </span>
+                    )}
+                  </th>
                 ))}
               </tr>
             </thead>
