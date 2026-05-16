@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Briefcase, Loader2, Sparkles } from 'lucide-react'
+import { Plus, Trash2, Briefcase, Loader2, Sparkles, Pencil } from 'lucide-react'
 import { supabase, type JobApplication } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { callAI } from '@/lib/chatService'
@@ -106,9 +106,24 @@ export default function JobsPage() {
     ['applied', 'phone_screen', 'interview', 'offer'].map(s => [s, jobs.filter(j => j.status === s).length])
   )
 
+  const [editJob, setEditJob] = useState<JobApplication | null>(null)
+
+  const openEditJob = (j: JobApplication) => {
+    setForm({ company_name: j.company_name, job_title: j.job_title, status: j.status, applied_date: j.applied_date ?? new Date().toISOString().split('T')[0], salary_min: j.salary_min ? String(j.salary_min) : '', salary_max: j.salary_max ? String(j.salary_max) : '', location: j.location ?? '', remote_type: j.remote_type ?? 'hybrid', notes: j.notes ?? '' })
+    setEditJob(j)
+    setShowAdd(true)
+  }
+
   const add = async () => {
     if (!user || !form.company_name || !form.job_title) return
     setSaving(true)
+    if (editJob) {
+      const { data } = await supabase.from('job_applications').update({ company_name: form.company_name, job_title: form.job_title, status: form.status, applied_date: form.applied_date || null, salary_min: parseFloat(form.salary_min) || null, salary_max: parseFloat(form.salary_max) || null, location: form.location || null, remote_type: form.remote_type || null, notes: form.notes || null }).eq('id', editJob.id).select('*').single()
+      if (data) setJobs(p => p.map(x => x.id === data.id ? data : x))
+      setSaving(false); setShowAdd(false); setEditJob(null)
+      setForm({ company_name: '', job_title: '', status: 'applied', applied_date: new Date().toISOString().split('T')[0], salary_min: '', salary_max: '', location: '', remote_type: 'hybrid', notes: '' })
+      return
+    }
     const { data, error } = await supabase.from('job_applications').insert({
       owner_id: user.id,
       company_name: form.company_name,
@@ -204,7 +219,10 @@ export default function JobsPage() {
                       <td className="px-5 py-3 text-slate-400 text-xs">{j.location ? `${j.location}${j.remote_type ? ` (${j.remote_type})` : ''}` : '—'}</td>
                       <td className="px-5 py-3 text-slate-500 text-xs max-w-[160px] truncate">{j.notes ?? '—'}</td>
                       <td className="px-5 py-3">
-                        <button onClick={() => del(j.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                        <div className="flex gap-1">
+                          <button onClick={() => openEditJob(j)} className="text-slate-600 hover:text-brand-400 p-1"><Pencil size={13} /></button>
+                          <button onClick={() => del(j.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -271,9 +289,9 @@ export default function JobsPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={add} disabled={saving || !form.company_name || !form.job_title} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Application'}
+                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editJob ? 'Save Changes' : 'Save Application'}
               </button>
-              <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
+              <button onClick={() => { setShowAdd(false); setEditJob(null) }} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>

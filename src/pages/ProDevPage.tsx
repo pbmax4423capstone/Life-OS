@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, GraduationCap, Loader2, Sparkles } from 'lucide-react'
+import { Plus, Trash2, GraduationCap, Loader2, Sparkles, Pencil } from 'lucide-react'
 import { supabase, type Certification } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { callAI } from '@/lib/chatService'
@@ -96,9 +96,24 @@ export default function ProDevPage() {
       .then(({ data }) => { setCerts(data ?? []); setLoading(false) })
   }, [user])
 
+  const [editCert, setEditCert] = useState<Certification | null>(null)
+
+  const openEditCert = (c: Certification) => {
+    setForm({ name: c.name, issuing_org: c.issuing_org ?? '', status: c.status, progress_pct: String(c.progress_pct), target_date: c.target_date ?? '', achieved_date: c.achieved_date ?? '', expiry_date: c.expiry_date ?? '' })
+    setEditCert(c)
+    setShowAdd(true)
+  }
+
   const add = async () => {
     if (!user || !form.name) return
     setSaving(true)
+    if (editCert) {
+      const { data } = await supabase.from('certifications').update({ name: form.name, issuing_org: form.issuing_org || null, status: form.status, progress_pct: parseInt(form.progress_pct) || 0, target_date: form.target_date || null, achieved_date: form.achieved_date || null, expiry_date: form.expiry_date || null }).eq('id', editCert.id).select('*').single()
+      if (data) setCerts(p => p.map(x => x.id === data.id ? data : x))
+      setSaving(false); setShowAdd(false); setEditCert(null)
+      setForm({ name: '', issuing_org: '', status: 'not_started', progress_pct: '', target_date: '', achieved_date: '', expiry_date: '' })
+      return
+    }
     const { data, error } = await supabase.from('certifications').insert({
       owner_id: user.id,
       name: form.name,
@@ -184,7 +199,8 @@ export default function ProDevPage() {
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusBadge(c.status)}`}>
                       {c.status.replace('_', ' ')}
                     </span>
-                    <button onClick={() => del(c.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                    <button onClick={() => openEditCert(c)} className="text-slate-600 hover:text-brand-400 p-1" title="Edit"><Pencil size={13} /></button>
+                    <button onClick={() => del(c.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1" title="Delete"><Trash2 size={14} /></button>
                   </div>
                 </div>
                 <ProgressBar pct={c.progress_pct} color={statusColor(c.status)} />
@@ -248,9 +264,9 @@ export default function ProDevPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={add} disabled={saving || !form.name} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Certification'}
+                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editCert ? 'Save Changes' : 'Save Certification'}
               </button>
-              <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
+              <button onClick={() => { setShowAdd(false); setEditCert(null) }} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>

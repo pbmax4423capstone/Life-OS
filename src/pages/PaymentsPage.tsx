@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Calendar, Loader2, CheckCircle2, CreditCard } from 'lucide-react'
+import { Plus, Trash2, Calendar, Loader2, CheckCircle2, CreditCard, Pencil } from 'lucide-react'
 import { supabase, type ScheduledPayment, type FinancialAccount } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -82,6 +82,7 @@ export default function PaymentsPage() {
 
   // ── Add payment ───────────────────────────────────────────
   const add = async () => {
+    if (editPayment) return update()
     if (!user || !form.payee_name || !form.amount) return
     setSaving(true)
     const { data, error } = await supabase.from('scheduled_payments').insert({
@@ -141,6 +142,45 @@ export default function PaymentsPage() {
   const del = async (id: string) => {
     await supabase.from('scheduled_payments').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     setPayments(p => p.filter(x => x.id !== id))
+  }
+
+  // ── Edit payment ──────────────────────────────────────────
+  const [editPayment, setEditPayment] = useState<ScheduledPayment | null>(null)
+
+  const openEdit = (p: ScheduledPayment) => {
+    const meta = parseMemo(p.memo)
+    setForm({
+      payee_account_id: p.to_account_id ?? '',
+      payee_name: p.payee_name ?? '',
+      amount: String(p.amount),
+      next_due_date: p.next_due_date,
+      from_account_id: p.from_account_id ?? '',
+      frequency: p.frequency.charAt(0).toUpperCase() + p.frequency.slice(1),
+      memo: (meta.note as string) ?? '',
+      auto_pay: p.auto_pay,
+    })
+    setEditPayment(p)
+    setShowAdd(true)
+  }
+
+  const update = async () => {
+    if (!editPayment || !form.payee_name || !form.amount) return
+    setSaving(true)
+    const { data, error } = await supabase.from('scheduled_payments').update({
+      from_account_id: form.from_account_id || null,
+      to_account_id: form.payee_account_id || null,
+      payee_name: form.payee_name,
+      amount: parseFloat(form.amount),
+      next_due_date: form.next_due_date || today(),
+      frequency: form.frequency.toLowerCase(),
+      memo: form.memo ? JSON.stringify({ note: form.memo }) : null,
+      auto_pay: form.auto_pay,
+    }).eq('id', editPayment.id).select('*').single()
+    if (!error && data) setPayments(p => p.map(x => x.id === data.id ? data : x))
+    setSaving(false)
+    setShowAdd(false)
+    setEditPayment(null)
+    setForm({ payee_account_id: '', payee_name: '', amount: '', next_due_date: '', from_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false })
   }
 
   const sourceLabel = (p: ScheduledPayment) => {
@@ -209,7 +249,10 @@ export default function PaymentsPage() {
                 <CheckCircle2 size={12} /> Paid
               </button>
             )}
-            <button onClick={() => del(p.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+            <button onClick={() => openEdit(p)} className="text-slate-600 hover:text-brand-400 transition-colors p-1" title="Edit">
+              <Pencil size={13} />
+            </button>
+            <button onClick={() => del(p.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1" title="Delete">
               <Trash2 size={14} />
             </button>
           </div>
@@ -286,7 +329,7 @@ export default function PaymentsPage() {
       {showAdd && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-100 mb-5">Schedule Payment</h3>
+            <h3 className="text-lg font-bold text-slate-100 mb-5">{editPayment ? 'Edit Payment' : 'Schedule Payment'}</h3>
             <div className="space-y-4">
               {/* Payee — debt account lookup */}
               <div>
@@ -374,9 +417,9 @@ export default function PaymentsPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={add} disabled={saving || !form.payee_account_id || !form.amount} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Payment'}
+                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editPayment ? 'Save Changes' : 'Save Payment'}
               </button>
-              <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
+              <button onClick={() => { setShowAdd(false); setEditPayment(null) }} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>

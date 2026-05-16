@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Heart, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Heart, Loader2, Pencil } from 'lucide-react'
 import { supabase, type Appointment, type InsuranceClaim } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -46,9 +46,24 @@ export default function HealthPage() {
     })
   }, [user])
 
+  const [editAppt, setEditAppt] = useState<(typeof appts)[0] | null>(null)
+
+  const openEditAppt = (a: (typeof appts)[0]) => {
+    setApptForm({ member_id: a.member_id ?? 'Patrick', reason: a.reason ?? '', appointment_type: a.appointment_type, appointment_date: a.appointment_date, appointment_time: a.appointment_time ?? '', location: a.location ?? '', status: a.status, telehealth: a.telehealth })
+    setEditAppt(a)
+    setShowAdd(true)
+  }
+
   const addAppt = async () => {
     if (!user || !apptForm.appointment_date) return
     setSaving(true)
+    if (editAppt) {
+      const { data } = await supabase.from('appointments').update({ member_id: apptForm.member_id, appointment_type: apptForm.appointment_type, reason: apptForm.reason || null, appointment_date: apptForm.appointment_date, appointment_time: apptForm.appointment_time || null, location: apptForm.location || null, status: apptForm.status, telehealth: apptForm.telehealth }).eq('id', editAppt.id).select('*').single()
+      if (data) setAppts(p => p.map(x => x.id === data.id ? data : x))
+      setSaving(false); setShowAdd(false); setEditAppt(null)
+      setApptForm({ member_id: 'Patrick', reason: '', appointment_type: 'Primary Care', appointment_date: '', appointment_time: '', location: '', status: 'scheduled', telehealth: false })
+      return
+    }
     const { data, error } = await supabase.from('appointments').insert({
       owner_id: user.id,
       member_id: apptForm.member_id,
@@ -173,9 +188,12 @@ export default function HealthPage() {
                     <td className="px-5 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusBadge(a.status)}`}>{a.status}</span>
                     </td>
-                    <td className="px-5 py-3">
-                      <button onClick={() => delAppt(a.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
-                    </td>
+                      <td className="px-5 py-3">
+                        <div className="flex gap-1">
+                          <button onClick={() => openEditAppt(a)} className="text-slate-600 hover:text-brand-400 transition-colors p-1"><Pencil size={13} /></button>
+                          <button onClick={() => delAppt(a.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                        </div>
+                      </td>
                   </tr>
                 ))}
               </tbody>
@@ -284,7 +302,7 @@ export default function HealthPage() {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             {tab === 'Appointments' ? (
               <>
-                <h3 className="text-lg font-bold text-slate-100 mb-5">Add Appointment</h3>
+                <h3 className="text-lg font-bold text-slate-100 mb-5">{editAppt ? 'Edit Appointment' : 'Add Appointment'}</h3>
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
