@@ -170,7 +170,7 @@ const BLANK_FORM = {
 type FormState = typeof BLANK_FORM
 
 export default function AccountsPage() {
-  const { user } = useAuthStore()
+  const { user, profile } = useAuthStore()
   const [searchParams, setSearchParams] = useSearchParams()
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
   const [scheduledPayments, setScheduledPayments] = useState<ScheduledPayment[]>([])
@@ -199,6 +199,30 @@ export default function AccountsPage() {
   const [paydaySettings] = useState(loadPaydaySettings)
   const [budgetAmount, setBudgetAmountState] = useState(loadBudget)
   const [showDueExpanded, setShowDueExpanded] = useState(false)
+
+  // Sync BNPL extras from Supabase profile (persists across Vercel preview URLs)
+  useEffect(() => {
+    if (!profile) return
+    const saved = (profile.preferences as Record<string, unknown>)?.bnpl_data
+    if (saved && typeof saved === 'object') {
+      const data = saved as Record<string, BNPLExtras>
+      setBnplData(data)
+      saveBnpl(data)
+    }
+  }, [profile])
+
+  // Helper: persist BNPL data to Supabase profile so it survives URL/device changes
+  const persistBnpl = (data: Record<string, BNPLExtras>) => {
+    setBnplData(data)
+    saveBnpl(data)
+    if (user) {
+      const prefs = (profile?.preferences as Record<string, unknown>) ?? {}
+      supabase.from('profiles')
+        .update({ preferences: { ...prefs, bnpl_data: data } })
+        .eq('id', user.id)
+        .then(() => {}).catch(() => {})
+    }
+  }
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -488,8 +512,7 @@ export default function AccountsPage() {
           payments_remaining: form.bnpl_payments_remaining,
         }
         const updatedBnpl = { ...bnplData, [accountId]: extras }
-        setBnplData(updatedBnpl)
-        saveBnpl(updatedBnpl)
+        persistBnpl(updatedBnpl)
 
         // Create/update the linked ScheduledPayment — fire-and-forget so it never blocks the modal
         if (form.bnpl_payment_amount && form.bnpl_due_date) {
@@ -536,8 +559,7 @@ export default function AccountsPage() {
     setAccounts(p => p.filter(a => a.id !== id))
     const updated = { ...bnplData }
     delete updated[id]
-    setBnplData(updated)
-    saveBnpl(updated)
+    persistBnpl(updated)
   }
 
   // ── Pay Now ──────────────────────────────────────────────────
@@ -606,8 +628,7 @@ export default function AccountsPage() {
         last_payment_amount:   payNowAmount,   // actual amount paid now
       }
       const updatedAll = { ...bnplData, [payNowAccount.id]: updated }
-      setBnplData(updatedAll)
-      saveBnpl(updatedAll)
+      persistBnpl(updatedAll)
     }
 
     // Advance any linked scheduled payment
