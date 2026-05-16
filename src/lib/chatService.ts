@@ -305,19 +305,8 @@ export async function callAI(
   systemPrompt?: string,
   maxTokens = 2000
 ): Promise<string> {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-  if (!supabaseUrl) throw new Error('Missing VITE_SUPABASE_URL')
-
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) throw new Error('Not authenticated')
-
-  const response = await fetch(`${supabaseUrl}/functions/v1/anthropic-proxy`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({
+  const { data, error } = await supabase.functions.invoke('anthropic-proxy', {
+    body: {
       requestType: 'ai_helper',
       payload: {
         model: 'claude-haiku-4-5-20251001',
@@ -325,16 +314,10 @@ export async function callAI(
         ...(systemPrompt ? { system: systemPrompt } : {}),
         messages: [{ role: 'user', content: userMessage }],
       },
-    }),
+    },
   })
-
-  if (!response.ok) {
-    const err = await response.text()
-    throw new Error(`AI error (${response.status}): ${err}`)
-  }
-
-  const data = await response.json()
-  return data.content?.[0]?.text ?? ''
+  if (error) throw new Error(error.message ?? 'AI call failed')
+  return (data as Record<string, unknown>)?.content?.[0]?.text ?? ''
 }
 
 // ── Suggested prompts by context ─────────────────────────────

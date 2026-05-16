@@ -75,6 +75,7 @@ interface BNPLExtras {
   auto_pay: boolean
   payments_remaining: string
   last_payment_date?: string
+  last_payment_amount?: string   // actual amount paid in the most recent Pay Now
 }
 function loadBnpl(): Record<string, BNPLExtras> {
   try { return JSON.parse(localStorage.getItem('life_os_bnpl') ?? '{}') } catch { return {} }
@@ -280,14 +281,10 @@ export default function AccountsPage() {
     const dt     = getDisplayType(a)
     const extras = bnplData[a.id]
     const sched  = paymentsByAccount[a.id]
-    // Only if due_date has moved PAST nextPayday (payment was made, advancing the date)
-    const paidDate = extras?.last_payment_date ?? (sched?.anchor_date ?? null)
-    const amount   = parseFloat(extras?.payment_amount || '0') || sched?.amount || 0
-    // Count if paid within this cycle AND due_date is now past nextPayday (was paid off this period)
+    const paidDate   = extras?.last_payment_date ?? (sched?.anchor_date ?? null)
+    // Use actual paid amount, falling back to scheduled amount
+    const amount     = parseFloat(extras?.last_payment_amount ?? extras?.payment_amount ?? '0') || sched?.amount || 0
     if (paidDate && paidDate >= periodStart && paidDate <= nextPayday! && amount > 0) {
-      // Verify the original due was within this period (before payment advanced it)
-      const currentDue = dt === 'buy_now_pay_later' ? extras?.due_date : sched?.next_due_date
-      // If already in dueItems (still unpaid), skip — don't double count
       if (dueItems.some(i => i.account.id === a.id)) return []
       return [{ account: a, paidDate, amount, extras, sched }]
     }
@@ -551,24 +548,25 @@ export default function AccountsPage() {
     // Update BNPL extras: decrement payments_remaining, record last_payment_date, advance due_date
     const dt = getDisplayType(payNowAccount)
     if (dt === 'buy_now_pay_later') {
-      const extras = bnplData[payNowAccount.id]
-      if (extras) {
-        const remaining = parseInt(extras.payments_remaining) || 0
-        const newRemaining = Math.max(0, remaining - 1)
-        // Advance due_date so this account leaves the "due before payday" list
-        const newDueDate = newRemaining > 0
-          ? advanceDueDate(extras.due_date, extras.payment_interval)
-          : extras.due_date
-        const updated: BNPLExtras = {
-          ...extras,
-          payments_remaining: String(newRemaining),
-          last_payment_date: payNowDate,
-          due_date: newDueDate,
-        }
-        const updatedAll = { ...bnplData, [payNowAccount.id]: updated }
-        setBnplData(updatedAll)
-        saveBnpl(updatedAll)
+      const existing = bnplData[payNowAccount.id]
+      const remaining = parseInt(existing?.payments_remaining ?? '1') || 1
+      const newRemaining = Math.max(0, remaining - 1)
+      const currentDueDate = existing?.due_date ?? payNowDate
+      const newDueDate = newRemaining > 0
+        ? advanceDueDate(currentDueDate, existing?.payment_interval ?? 'Monthly')
+        : currentDueDate
+      const updated: BNPLExtras = {
+        payment_amount:        existing?.payment_amount ?? payNowAmount,
+        payment_interval:      existing?.payment_interval ?? 'Monthly',
+        due_date:              newDueDate,
+        auto_pay:              existing?.auto_pay ?? false,
+        payments_remaining:    String(newRemaining),
+        last_payment_date:     payNowDate,
+        last_payment_amount:   payNowAmount,   // actual amount paid now
       }
+      const updatedAll = { ...bnplData, [payNowAccount.id]: updated }
+      setBnplData(updatedAll)
+      saveBnpl(updatedAll)
     }
 
     // Advance any linked scheduled payment
@@ -881,13 +879,15 @@ export default function AccountsPage() {
                       {(() => {
                         const lastDate   = isBNPL ? bnplExtras?.last_payment_date : sched?.anchor_date
                         const lastAmount = isBNPL
-                          ? (bnplExtras?.payment_amount ? parseFloat(bnplExtras.payment_amount) : null)
+                          ? parseFloat(bnplExtras?.last_payment_amount ?? bnplExtras?.payment_amount ?? '0') || null
                           : sched?.amount ?? null
                         if (lastDate) {
                           return (
                             <div>
                               <div className="text-xs font-semibold text-sky-400">{lastDate}</div>
-                              {lastAmount != null && <div className="text-xs text-slate-500">{fmt(lastAmount)}</div>}
+                              {lastAmount != null && lastAmount > 0 && (
+                                <div className="text-xs text-slate-400 font-medium">{fmt(lastAmount)}</div>
+                              )}
                             </div>
                           )
                         }

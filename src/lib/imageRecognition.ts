@@ -66,19 +66,9 @@ export async function recognizeImage(
   base64Image: string,
   mediaType: string = 'image/jpeg'
 ): Promise<RecognitionResult> {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-  if (!supabaseUrl) throw new Error('Supabase URL not configured')
-
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) throw new Error('Not authenticated')
-
-  const response = await fetch(`${supabaseUrl}/functions/v1/anthropic-proxy`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({
+  // Use supabase.functions.invoke to avoid CORS issues with raw fetch
+  const { data, error } = await supabase.functions.invoke('anthropic-proxy', {
+    body: {
       requestType: 'image_recognition',
       payload: {
         model: 'claude-haiku-4-5-20251001',
@@ -97,16 +87,13 @@ export async function recognizeImage(
           },
         ],
       },
-    }),
+    },
   })
 
-  if (!response.ok) {
-    const err = await response.text()
-    throw new Error(`Claude API error: ${err}`)
-  }
+  if (error) throw new Error(error.message ?? 'AI recognition failed')
+  if (!data) throw new Error('No response from AI')
 
-  const data = await response.json()
-  const rawText = data.content?.[0]?.text ?? ''
+  const rawText = (data as Record<string, unknown>)?.content?.[0]?.text ?? ''
 
   let parsed: Record<string, unknown>
   try {
