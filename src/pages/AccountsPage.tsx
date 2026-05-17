@@ -460,7 +460,11 @@ export default function AccountsPage() {
     setSaving(true)
     setSaveError(null)
 
-    const isBNPL = form.account_type === 'Buy Now Pay Later'
+    // Save payment extras for ALL debt account types
+    const isDebtAccount = form.accountKind === 'debt' ||
+      ['credit_card','buy_now_pay_later','mortgage','auto_loan','student_loan','401k_loan'].includes(typeKey) ||
+      (!!editAccount && DEBT_TYPES.includes(getDisplayType(editAccount)))
+    const isBNPL = typeKey === 'buy_now_pay_later'
     const typeKey = form.account_type.toLowerCase().replace(/ /g, '_')
     const dbType = toDbType(typeKey)                    // valid DB enum value
     const iconValue = EXTENDED_TYPES.has(typeKey)       // store real type in icon
@@ -512,7 +516,7 @@ export default function AccountsPage() {
       }
 
       // ── Save BNPL extras to localStorage ───────────────────
-      if (isBNPL && accountId) {
+      if (isDebtAccount && accountId && (form.bnpl_payment_amount || form.bnpl_due_date || form.bnpl_payments_remaining)) {
         const extras: BNPLExtras = {
           payment_amount: form.bnpl_payment_amount,
           payment_interval: form.bnpl_interval,
@@ -677,7 +681,11 @@ export default function AccountsPage() {
     setPayNowAccount(null)
   }
 
-  const isBNPLForm = form.account_type === 'Buy Now Pay Later'
+  // Show payment details for ALL debt account types, not just BNPL
+  const isDebtForm = form.accountKind === 'debt' ||
+    ['Credit Card', 'Buy Now Pay Later', 'Mortgage', 'Auto Loan', 'Student Loan', '401K Loan'].includes(form.account_type) ||
+    (!!editAccount && DEBT_TYPES.includes(getDisplayType(editAccount)))
+  const isBNPLForm = form.account_type === 'Buy Now Pay Later'  // kept for "Remaining Balance" label only
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -917,7 +925,7 @@ export default function AccountsPage() {
                 const isDebt = DEBT_TYPES.includes(dt)
                 const isBNPL = dt === 'buy_now_pay_later'
 
-                const isPaidOff = isBNPL && (parseInt(bnplExtras?.payments_remaining ?? '1') <= 0)
+                const isPaidOff = isDebt && (parseInt(bnplExtras?.payments_remaining ?? '1') <= 0)
 
                 return (
                   <tr key={a.id}
@@ -956,11 +964,11 @@ export default function AccountsPage() {
                     </td>
                     <td className="px-5 py-3 text-slate-300">{a.interest_rate != null ? `${a.interest_rate}%` : '—'}</td>
 
-                    {/* Next Payment column */}
+                    {/* Next Payment column — use extras for any debt type that has them */}
                     <td className="px-5 py-3">
-                      {isBNPL && bnplExtras?.due_date ? (
+                      {bnplExtras?.due_date ? (
                         <div className="space-y-1">
-                          <div className="text-xs font-semibold text-purple-400">{bnplExtras.due_date}</div>
+                          <div className="text-xs font-semibold text-amber-400">{bnplExtras.due_date}</div>
                           <div className="text-xs text-slate-500">{bnplExtras.payment_interval} · {bnplExtras.payment_amount ? fmt(parseFloat(bnplExtras.payment_amount)) : '—'}</div>
                           <button onClick={e => openPayNow(a, e)}
                             className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg bg-brand-500/15 hover:bg-brand-500/25 text-brand-400 border border-brand-500/20 transition-colors">
@@ -1010,9 +1018,9 @@ export default function AccountsPage() {
                       })()}
                     </td>
 
-                    {/* Payments Left column */}
+                    {/* Payments Left column — shown for all debt types with extras */}
                     <td className="px-5 py-3">
-                      {isBNPL ? (
+                      {isDebt && bnplExtras ? (
                         <div className="space-y-0.5">
                           {isPaidOff ? (
                             <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold">
@@ -1020,15 +1028,15 @@ export default function AccountsPage() {
                             </span>
                           ) : (
                             <>
-                              {bnplExtras?.payments_remaining && (
-                                <div className="text-xs font-semibold text-purple-300">
+                              {bnplExtras.payments_remaining && (
+                                <div className="text-xs font-semibold text-slate-300">
                                   {bnplExtras.payments_remaining} payments left
                                 </div>
                               )}
-                              {bnplExtras?.last_payment_date && (
+                              {bnplExtras.last_payment_date && (
                                 <div className="text-xs text-slate-500">Last paid: {bnplExtras.last_payment_date}</div>
                               )}
-                              {bnplExtras?.auto_pay && (
+                              {bnplExtras.auto_pay && (
                                 <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Auto-Pay</span>
                               )}
                             </>
@@ -1199,10 +1207,10 @@ export default function AccountsPage() {
                     )}
                   </div>
 
-                  {/* BNPL-specific fields */}
-                  {isBNPLForm && (
+                  {/* Debt payment details — shown for ALL debt account types */}
+                  {isDebtForm && (
                     <div className="space-y-4 pt-3 border-t border-slate-800">
-                      <div className="text-xs font-semibold text-purple-400 uppercase tracking-wide">Buy Now Pay Later Details</div>
+                      <div className="text-xs font-semibold text-red-400 uppercase tracking-wide">Debt Payment Details</div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Amount ($)</label>
@@ -1228,7 +1236,7 @@ export default function AccountsPage() {
                           <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payments Remaining</label>
                           <input type="number" min={0} value={form.bnpl_payments_remaining}
                             onChange={e => setForm(p => ({ ...p, bnpl_payments_remaining: e.target.value }))}
-                            className="input-base" placeholder="e.g. 4" />
+                            className="input-base" placeholder="e.g. 120" />
                         </div>
                       </div>
                       <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl bg-slate-800/60 border border-slate-700/50">
