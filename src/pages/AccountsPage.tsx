@@ -18,7 +18,7 @@ const ACCOUNT_TYPE_MAP: Record<string, string> = {
   'Savings': 'savings',
   'Credit Card': 'credit_card',
   'Mortgage': 'mortgage',
-  'Auto Loan': 'auto_loan',
+  'Auto Loan': 'loan',
   'Student Loan': 'student_loan',
   'Personal Loan': 'personal_loan',
   'BNPL': 'bnpl',
@@ -29,10 +29,11 @@ const ACCOUNT_TYPE_MAP: Record<string, string> = {
 }
 const ACCOUNT_TYPES = Object.keys(ACCOUNT_TYPE_MAP)
 
-// Reverse map: DB value → display label. Includes legacy 'loan' alias for auto loans.
+// Reverse map: DB value → display label. Covers both the canonical 'loan'
+// value and the legacy 'auto_loan' value that older rows may carry.
 const DB_TO_LABEL: Record<string, string> = {
   ...Object.fromEntries(Object.entries(ACCOUNT_TYPE_MAP).map(([label, db]) => [db, label])),
-  loan: 'Auto Loan',       // legacy alias some rows may still carry
+  auto_loan: 'Auto Loan',  // legacy rows written before the enum was enforced
   '401k_loan': '401k Loan',
   heloc: 'HELOC',
 }
