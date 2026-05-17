@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload, Pencil, TrendingUp, TrendingDown, BarChart2, DollarSign, CheckCircle2, ChevronDown, ChevronUp, CalendarClock } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Plus, Trash2, CreditCard, Loader2, ScanLine, Upload, Pencil, TrendingUp, TrendingDown, BarChart2, DollarSign, CheckCircle2, ChevronDown, ChevronUp, CalendarClock, Building2, RefreshCw } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
+import { usePlaidLink } from 'react-plaid-link'
 import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { recognizeImage } from '@/lib/imageRecognition'
+import { createLinkToken, exchangeToken, syncAccounts } from '@/lib/plaidService'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)
@@ -195,6 +197,13 @@ export default function AccountsPage() {
   const [payingNow, setPayingNow] = useState(false)
   const [payNowError, setPayNowError] = useState<string | null>(null)
 
+  // Plaid Link state
+  const [linkToken, setLinkToken] = useState<string | null>(null)
+  const [connecting, setConnecting] = useState(false)
+  const [syncingAll, setSyncingAll] = useState(false)
+  const [syncingItemId, setSyncingItemId] = useState<string | null>(null)
+  const [plaidError, setPlaidError] = useState<string | null>(null)
+
   // Payday + budget state
   const [paydaySettings] = useState(loadPaydaySettings)
   const [budgetAmount, setBudgetAmountState] = useState(loadBudget)
@@ -222,6 +231,75 @@ export default function AccountsPage() {
         .eq('id', user.id)
         .then(() => {}).catch(() => {})
     }
+  }
+
+  // ── Plaid Link: reload accounts from DB ──────────────────────
+  const reloadAccounts = useCallback(async () => {
+    if (!user) return
+    const { data } = await supabase.from('financial_accounts').select('*')
+      .eq('owner_id', user.id).is('deleted_at', null).order('sort_order')
+    if (data) setAccounts(data)
+  }, [user])
+
+  const openPlaidLink = async () => {
+    setConnecting(true)
+    setPlaidError(null)
+    try {
+      const token = await createLinkToken(['transactions', 'liabilities'])
+      setLinkToken(token)
+    } catch (e) {
+      setPlaidError(e instanceof Error ? e.message : 'Failed to initialize Plaid')
+      setConnecting(false)
+    }
+  }
+
+  const onPlaidSuccess = useCallback(async (publicToken: string, metadata: any) => {
+    setConnecting(true)
+    setPlaidError(null)
+    try {
+      await exchangeToken(publicToken, metadata)
+      await reloadAccounts()
+    } catch (e) {
+      setPlaidError(e instanceof Error ? e.message : 'Failed to link account')
+    }
+    setConnecting(false)
+    setLinkToken(null)
+  }, [reloadAccounts])
+
+  const { open: openPlaid, ready: plaidReady } = usePlaidLink({
+    token: linkToken,
+    onSuccess: onPlaidSuccess,
+    onExit: () => { setConnecting(false); setLinkToken(null) },
+  })
+
+  useEffect(() => {
+    if (linkToken && plaidReady) {
+      openPlaid()
+    }
+  }, [linkToken, plaidReady, openPlaid])
+
+  const handleSyncAll = async () => {
+    setSyncingAll(true)
+    setPlaidError(null)
+    try {
+      await syncAccounts()
+      await reloadAccounts()
+    } catch (e) {
+      setPlaidError(e instanceof Error ? e.message : 'Sync failed')
+    }
+    setSyncingAll(false)
+  }
+
+  const handleSyncItem = async (plaidItemId: string) => {
+    setSyncingItemId(plaidItemId)
+    setPlaidError(null)
+    try {
+      await syncAccounts(plaidItemId)
+      await reloadAccounts()
+    } catch (e) {
+      setPlaidError(e instanceof Error ? e.message : 'Sync failed')
+    }
+    setSyncingItemId(null)
   }
 
   useEffect(() => {
@@ -705,6 +783,20 @@ export default function AccountsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={openPlaidLink} disabled={connecting}
+            className="btn-ghost flex items-center gap-2 border border-slate-700">
+            {connecting
+              ? <><Loader2 size={15} className="animate-spin text-brand-400" /> Connecting…</>
+              : <><Building2 size={15} className="text-brand-400" /> Connect Bank</>}
+          </button>
+          {accounts.some(a => a.plaid_account_id) && (
+            <button onClick={handleSyncAll} disabled={syncingAll}
+              className="btn-ghost flex items-center gap-2 border border-slate-700">
+              {syncingAll
+                ? <><Loader2 size={15} className="animate-spin text-emerald-400" /> Syncing…</>
+                : <><RefreshCw size={15} className="text-emerald-400" /> Sync All</>}
+            </button>
+          )}
           <button onClick={() => fileInputRef.current?.click()} disabled={scanning}
             className="btn-ghost flex items-center gap-2 border border-slate-700">
             {scanning ? <><Loader2 size={15} className="animate-spin text-brand-400" /> Scanning…</> : <><ScanLine size={15} className="text-brand-400" /> Import Snip</>}
@@ -718,6 +810,13 @@ export default function AccountsPage() {
       {scanError && (
         <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2.5">
           <span className="font-medium">Scan error:</span> {scanError}
+        </div>
+      )}
+
+      {plaidError && (
+        <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2.5 flex items-center justify-between">
+          <span><span className="font-medium">Plaid error:</span> {plaidError}</span>
+          <button onClick={() => setPlaidError(null)} className="text-slate-500 hover:text-slate-300 ml-3">✕</button>
         </div>
       )}
 
@@ -938,9 +1037,27 @@ export default function AccountsPage() {
                         <div>
                           <div className="font-medium text-slate-200 flex items-center gap-1.5">
                             {a.nickname ?? a.institution_name}
-                            <Pencil size={11} className="text-slate-600 opacity-0 group-hover:opacity-100" />
+                            {a.plaid_account_id ? (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-normal">Plaid</span>
+                            ) : (
+                              <Pencil size={11} className="text-slate-600 opacity-0 group-hover:opacity-100" />
+                            )}
                           </div>
-                          <div className="text-xs text-slate-500">{a.institution_name}{a.last_four ? ` ···${a.last_four}` : ''}</div>
+                          <div className="text-xs text-slate-500">
+                            {a.institution_name}{a.last_four ? ` ···${a.last_four}` : ''}
+                            {a.plaid_last_synced && (
+                              <span className="ml-1.5 text-slate-600">
+                                · Synced {(() => {
+                                  const mins = Math.round((Date.now() - new Date(a.plaid_last_synced).getTime()) / 60000)
+                                  if (mins < 1) return 'just now'
+                                  if (mins < 60) return `${mins}m ago`
+                                  const hrs = Math.round(mins / 60)
+                                  if (hrs < 24) return `${hrs}h ago`
+                                  return `${Math.round(hrs / 24)}d ago`
+                                })()}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -1050,9 +1167,23 @@ export default function AccountsPage() {
                     </td>
 
                     <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
-                      <button onClick={e => del(a.id, e)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
-                        <Trash2 size={14} />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {a.plaid_item_id && (
+                          <button
+                            onClick={e => { e.stopPropagation(); handleSyncItem(a.plaid_item_id!) }}
+                            disabled={syncingItemId === a.plaid_item_id}
+                            className="text-slate-600 hover:text-emerald-400 transition-colors p-1"
+                            title="Sync from Plaid"
+                          >
+                            {syncingItemId === a.plaid_item_id
+                              ? <Loader2 size={14} className="animate-spin text-emerald-400" />
+                              : <RefreshCw size={14} />}
+                          </button>
+                        )}
+                        <button onClick={e => del(a.id, e)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
