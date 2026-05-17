@@ -237,6 +237,14 @@ export default function AccountsPage() {
     else { setSortKey(key); setSortDir('asc') }
   }
 
+  // ── Must be declared before getSortValue and filtered (avoids TDZ crash on sort) ──
+  const paymentsByAccount: Record<string, ScheduledPayment> = {}
+  scheduledPayments.forEach(p => {
+    if (p.from_account_id && !paymentsByAccount[p.from_account_id]) {
+      paymentsByAccount[p.from_account_id] = p
+    }
+  })
+
   const getSortValue = (a: FinancialAccount): string | number => {
     const dt     = getDisplayType(a)
     const extras = bnplData[a.id]
@@ -261,14 +269,6 @@ export default function AccountsPage() {
       ? va - vb
       : String(va).localeCompare(String(vb))
     return sortDir === 'asc' ? cmp : -cmp
-  })
-
-  // ── Map each debt account → its next scheduled payment (must be before dueItems) ──
-  const paymentsByAccount: Record<string, ScheduledPayment> = {}
-  scheduledPayments.forEach(p => {
-    if (p.from_account_id && !paymentsByAccount[p.from_account_id]) {
-      paymentsByAccount[p.from_account_id] = p
-    }
   })
 
   // ── Stat card calculations (same classifier as Dashboard) ──
