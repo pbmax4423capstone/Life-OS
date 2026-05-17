@@ -135,12 +135,16 @@ export default function AccountsPage() {
       color: a.color,
     })
     setScanError(null)
+    setSaveError(null)
     setShowAdd(true)
   }
+
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const save = async () => {
     if (!user || !form.institution_name) return
     setSaving(true)
+    setSaveError(null)
     const typeKey = form.account_type.toLowerCase().replace(/ /g, '_')
     const payload = {
       account_type: typeKey,
@@ -153,18 +157,25 @@ export default function AccountsPage() {
       rewards_balance: parseFloat(form.rewards_balance) || 0,
       color: form.color,
     }
+    let error
     if (editingId) {
-      const { data, error } = await supabase.from('financial_accounts').update(payload).eq('id', editingId).select('*').single()
-      if (!error && data) setAccounts(p => p.map(a => a.id === editingId ? data : a))
+      const res = await supabase.from('financial_accounts').update(payload).eq('id', editingId).select('*').single()
+      error = res.error
+      if (!error && res.data) setAccounts(p => p.map(a => a.id === editingId ? res.data : a))
     } else {
-      const { data, error } = await supabase.from('financial_accounts').insert({
+      const res = await supabase.from('financial_accounts').insert({
         owner_id: user.id, ...payload,
         status: 'active', sort_order: accounts.length,
         rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
       }).select('*').single()
-      if (!error && data) setAccounts(p => [...p, data])
+      error = res.error
+      if (!error && res.data) setAccounts(p => [...p, res.data])
     }
     setSaving(false)
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
     setShowAdd(false)
     setEditingId(null)
     setForm(BLANK_FORM)
@@ -203,7 +214,7 @@ export default function AccountsPage() {
               ? <><Loader2 size={15} className="animate-spin text-brand-400" /> Scanning…</>
               : <><ScanLine size={15} className="text-brand-400" /> Import Snip</>}
           </button>
-          <button onClick={() => { setForm(BLANK_FORM); setEditingId(null); setScanError(null); setShowAdd(true) }} className="btn-primary flex items-center gap-2">
+          <button onClick={() => { setForm(BLANK_FORM); setEditingId(null); setScanError(null); setSaveError(null); setShowAdd(true) }} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Account
           </button>
         </div>
@@ -410,8 +421,14 @@ export default function AccountsPage() {
               <button onClick={save} disabled={saving || !form.institution_name || scanning} className="btn-primary flex-1 justify-center flex items-center gap-2">
                 {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editingId ? 'Save Changes' : 'Save Account'}
               </button>
-              <button onClick={() => { setShowAdd(false); setEditingId(null); setScanError(null) }} className="btn-ghost">Cancel</button>
+              <button onClick={() => { setShowAdd(false); setEditingId(null); setScanError(null); setSaveError(null) }} className="btn-ghost">Cancel</button>
             </div>
+
+            {saveError && (
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mt-3">
+                Failed to save account: {saveError}
+              </p>
+            )}
 
             {/* Re-scan shortcut inside modal — only when adding */}
             {!editingId && (
