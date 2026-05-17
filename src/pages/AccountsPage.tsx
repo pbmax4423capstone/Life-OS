@@ -37,14 +37,16 @@ const EXTENDED_TYPES = new Set([
 ])
 
 const DB_TYPE_MAP: Record<string, string> = {
-  buy_now_pay_later:    'credit_card',
+  buy_now_pay_later:    'credit_card',   // BNPL stored as credit_card + icon
   money_market:         'savings',
   stocks:               'investment',
   bonds:                'investment',
   bitcoin:              'investment',
   'retirement_/_401k':  'retirement',
   other_investment:     'investment',
-  '401k_loan':          'other',
+  '401k_loan':          'other',         // 401K loan stored as other + icon
+  // These map directly and are valid DB enum values:
+  // credit_card, mortgage, auto_loan, student_loan, checking, savings, investment, retirement, cd, other
 }
 
 /** Type stored in DB (valid enum value) */
@@ -505,6 +507,8 @@ export default function AccountsPage() {
           interest_rate: form.interest_rate !== '' ? parseFloat(form.interest_rate) : null,
           credit_limit: form.credit_limit ? parseFloat(form.credit_limit) : null,
           rewards_balance: parseFloat(form.rewards_balance) || 0,
+          rewards_unit: 'points',
+          rewards_cpp: 0.01,
           color: form.color,
           owner_id: user.id,
           status: 'active',
