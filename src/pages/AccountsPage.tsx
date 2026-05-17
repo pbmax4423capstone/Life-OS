@@ -224,7 +224,7 @@ export default function AccountsPage() {
       account_type: DB_TO_LABEL[a.account_type] ?? a.account_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
       institution_name: a.institution_name,
       last_four: a.last_four ?? '',
-      current_balance: String(Math.abs(a.current_balance)),
+      current_balance: String(a.current_balance),
       interest_rate: a.interest_rate != null ? String(a.interest_rate) : '',
       credit_limit: a.credit_limit != null ? String(a.credit_limit) : '',
       rewards_balance: a.rewards_balance > 0 ? String(a.rewards_balance) : '',
@@ -245,98 +245,103 @@ export default function AccountsPage() {
     if (!user || !form.institution_name) return
     setSaving(true)
     setSaveError(null)
-    const typeKey = ACCOUNT_TYPE_MAP[form.account_type] ?? form.account_type.toLowerCase().replace(/ /g, '_')
-    const isDebt = DEBT_TYPES.includes(typeKey)
-    const balanceRaw = parseFloat(form.current_balance) || 0
-    const balance = isDebt ? -Math.abs(balanceRaw) : Math.abs(balanceRaw)
 
-    const payload = {
-      account_type: typeKey,
-      institution_name: form.institution_name,
-      nickname: form.nickname || null,
-      last_four: form.last_four || null,
-      current_balance: balance,
-      interest_rate: parseFloat(form.interest_rate) || null,
-      credit_limit: parseFloat(form.credit_limit) || null,
-      rewards_balance: parseFloat(form.rewards_balance) || 0,
-      color: form.color,
-    }
+    try {
+      const typeKey = ACCOUNT_TYPE_MAP[form.account_type] ?? form.account_type.toLowerCase().replace(/ /g, '_')
+      const isDebt = DEBT_TYPES.includes(typeKey)
 
-    let error
-    let accountId = editingId
-    if (editingId) {
-      const res = await supabase.from('financial_accounts').update(payload).eq('id', editingId).select('*').single()
-      error = res.error
-      if (!error && res.data) setAccounts(p => p.map(a => a.id === editingId ? res.data : a))
-    } else {
-      const res = await supabase.from('financial_accounts').insert({
-        owner_id: user.id, ...payload,
-        status: 'active', sort_order: accounts.length,
-        rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
-      }).select('*').single()
-      error = res.error
-      if (!error && res.data) {
-        setAccounts(p => [...p, res.data])
-        accountId = res.data.id
+      const payload = {
+        account_type: typeKey,
+        institution_name: form.institution_name,
+        nickname: form.nickname || null,
+        last_four: form.last_four || null,
+        current_balance: parseFloat(form.current_balance) || 0,
+        interest_rate: parseFloat(form.interest_rate) || null,
+        credit_limit: parseFloat(form.credit_limit) || null,
+        rewards_balance: parseFloat(form.rewards_balance) || 0,
+        color: form.color,
       }
-    }
 
-    if (error) {
-      setSaving(false)
-      setSaveError(error.message)
-      return
-    }
-
-    // Save scheduled payment for debt accounts
-    if (isDebt && accountId && form.payment_amount) {
-      const pmtAmount = parseFloat(form.payment_amount)
-      if (pmtAmount > 0) {
-        const existingPmt = payments[accountId]
-        const memo = form.payments_remaining ? `payments_remaining:${form.payments_remaining}` : null
-
-        if (existingPmt) {
-          const { data: pmtData, error: pmtError } = await supabase.from('scheduled_payments')
-            .update({
-              payee_name: form.nickname || form.institution_name,
-              amount: pmtAmount,
-              frequency: form.payment_interval.toLowerCase(),
-              next_due_date: form.next_due_date || new Date().toISOString().split('T')[0],
-              auto_pay: form.auto_pay,
-              memo,
-            }).eq('id', existingPmt.id).select('*').single()
-          if (pmtError) {
-            setSaving(false)
-            setSaveError(`Account saved, but payment details failed: ${pmtError.message}`)
-            return
-          }
-          if (pmtData) setPayments(p => ({ ...p, [accountId!]: pmtData }))
-        } else {
-          const { data: pmtData, error: pmtError } = await supabase.from('scheduled_payments')
-            .insert({
-              owner_id: user.id,
-              from_account_id: accountId,
-              payee_name: form.nickname || form.institution_name,
-              amount: pmtAmount,
-              frequency: form.payment_interval.toLowerCase(),
-              next_due_date: form.next_due_date || new Date().toISOString().split('T')[0],
-              auto_pay: form.auto_pay,
-              status: 'active',
-              memo,
-            }).select('*').single()
-          if (pmtError) {
-            setSaving(false)
-            setSaveError(`Account saved, but payment details failed: ${pmtError.message}`)
-            return
-          }
-          if (pmtData) setPayments(p => ({ ...p, [accountId!]: pmtData }))
+      let accountId = editingId
+      if (editingId) {
+        const res = await supabase.from('financial_accounts').update(payload).eq('id', editingId).select('*').single()
+        if (res.error) {
+          setSaving(false)
+          setSaveError(res.error.message)
+          return
+        }
+        if (res.data) setAccounts(p => p.map(a => a.id === editingId ? res.data : a))
+      } else {
+        const res = await supabase.from('financial_accounts').insert({
+          owner_id: user.id, ...payload,
+          status: 'active', sort_order: accounts.length,
+          rewards_unit: 'points', rewards_cpp: 0.01, icon: '🏦',
+        }).select('*').single()
+        if (res.error) {
+          setSaving(false)
+          setSaveError(res.error.message)
+          return
+        }
+        if (res.data) {
+          setAccounts(p => [...p, res.data])
+          accountId = res.data.id
         }
       }
-    }
 
-    setSaving(false)
-    setShowAdd(false)
-    setEditingId(null)
-    setForm(BLANK_FORM)
+      // Save scheduled payment for debt accounts
+      if (isDebt && accountId && form.payment_amount) {
+        const pmtAmount = parseFloat(form.payment_amount)
+        if (pmtAmount > 0) {
+          const existingPmt = payments[accountId]
+          const memo = form.payments_remaining ? `payments_remaining:${form.payments_remaining}` : null
+
+          if (existingPmt) {
+            const { data: pmtData, error: pmtError } = await supabase.from('scheduled_payments')
+              .update({
+                payee_name: form.nickname || form.institution_name,
+                amount: pmtAmount,
+                frequency: form.payment_interval.toLowerCase(),
+                next_due_date: form.next_due_date || new Date().toISOString().split('T')[0],
+                auto_pay: form.auto_pay,
+                memo,
+              }).eq('id', existingPmt.id).select('*').single()
+            if (pmtError) {
+              setSaving(false)
+              setSaveError(`Account saved, but payment details failed: ${pmtError.message}`)
+              return
+            }
+            if (pmtData) setPayments(p => ({ ...p, [accountId!]: pmtData }))
+          } else {
+            const { data: pmtData, error: pmtError } = await supabase.from('scheduled_payments')
+              .insert({
+                owner_id: user.id,
+                from_account_id: accountId,
+                payee_name: form.nickname || form.institution_name,
+                amount: pmtAmount,
+                frequency: form.payment_interval.toLowerCase(),
+                next_due_date: form.next_due_date || new Date().toISOString().split('T')[0],
+                auto_pay: form.auto_pay,
+                status: 'active',
+                memo,
+              }).select('*').single()
+            if (pmtError) {
+              setSaving(false)
+              setSaveError(`Account saved, but payment details failed: ${pmtError.message}`)
+              return
+            }
+            if (pmtData) setPayments(p => ({ ...p, [accountId!]: pmtData }))
+          }
+        }
+      }
+
+      setSaving(false)
+      setShowAdd(false)
+      setEditingId(null)
+      setForm(BLANK_FORM)
+    } catch (e) {
+      setSaving(false)
+      setSaveError(e instanceof Error ? e.message : 'An unexpected error occurred while saving')
+    }
   }
 
   // ── Make Payment ───────────────────────────────────────────────
@@ -880,18 +885,19 @@ export default function AccountsPage() {
               </div>
             </div>
 
-            <div className="flex gap-3 mt-6">
+            {saveError && (
+              <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2.5 mt-4 flex items-start gap-2">
+                <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                <span>{saveError}</span>
+              </div>
+            )}
+
+            <div className="flex gap-3 mt-4">
               <button onClick={save} disabled={saving || !form.institution_name || scanning} className="btn-primary flex-1 justify-center flex items-center gap-2">
                 {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editingId ? 'Save Changes' : 'Save Account'}
               </button>
               <button onClick={() => { setShowAdd(false); setEditingId(null); setScanError(null); setSaveError(null) }} className="btn-ghost">Cancel</button>
             </div>
-
-            {saveError && (
-              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mt-3">
-                Failed to save account: {saveError}
-              </p>
-            )}
 
             {!editingId && (
               <button
