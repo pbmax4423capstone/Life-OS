@@ -12,7 +12,7 @@ import {
 } from '@/lib/debtCalculator'
 import { AiChat } from '@/components/chat/AiChat'
 
-const DEBT_TYPES = ['credit_card', 'loan', 'auto_loan', 'mortgage', 'heloc', 'student_loan', 'personal_loan', '401k_loan']
+const DEBT_TYPES = ['credit_card', 'loan', 'mortgage', 'heloc', 'student_loan', 'personal_loan', '401k_loan']
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)

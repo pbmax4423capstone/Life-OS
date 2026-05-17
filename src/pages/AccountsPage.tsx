@@ -7,14 +7,28 @@ import { recognizeImage } from '@/lib/imageRecognition'
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)
 
-const ACCOUNT_TYPES = ['Checking', 'Savings', 'Credit Card', 'Mortgage', 'Auto Loan',
-  'Student Loan', 'Investment', 'Retirement', 'CD', 'Other']
+const ACCOUNT_TYPE_MAP: Record<string, string> = {
+  'Checking': 'checking',
+  'Savings': 'savings',
+  'Credit Card': 'credit_card',
+  'Mortgage': 'mortgage',
+  'Auto Loan': 'loan',
+  'Student Loan': 'student_loan',
+  'Investment': 'investment',
+  'Retirement': 'retirement',
+  'CD': 'cd',
+  'Other': 'other',
+}
+const ACCOUNT_TYPES = Object.keys(ACCOUNT_TYPE_MAP)
+const DB_TO_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(ACCOUNT_TYPE_MAP).map(([label, db]) => [db, label])
+)
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
 
 function typeBadge(t: string) {
   if (['checking', 'savings', 'cd'].includes(t)) return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
   if (t === 'credit_card') return 'bg-amber-500/15 text-amber-400 border border-amber-500/25'
-  if (['mortgage', 'auto_loan', 'student_loan', 'personal_loan'].includes(t)) return 'bg-red-500/15 text-red-400 border border-red-500/25'
+  if (['mortgage', 'loan', 'student_loan', 'personal_loan'].includes(t)) return 'bg-red-500/15 text-red-400 border border-red-500/25'
   if (['investment', 'retirement'].includes(t)) return 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/25'
   return 'bg-slate-700/50 text-slate-400 border border-slate-600/50'
 }
@@ -110,12 +124,12 @@ export default function AccountsPage() {
   const tabs = ['All', 'Assets', 'Debt', 'Investments']
   const filtered = accounts.filter(a => {
     if (tab === 'Assets') return ['checking', 'savings', 'cd'].includes(a.account_type)
-    if (tab === 'Debt') return ['credit_card', 'mortgage', 'auto_loan', 'student_loan'].includes(a.account_type)
+    if (tab === 'Debt') return ['credit_card', 'mortgage', 'loan', 'student_loan'].includes(a.account_type)
     if (tab === 'Investments') return ['investment', 'retirement'].includes(a.account_type)
     return true
   })
 
-  const DEBT_TYPES = ['credit_card', 'mortgage', 'auto_loan', 'student_loan', 'personal_loan']
+  const DEBT_TYPES = ['credit_card', 'mortgage', 'loan', 'student_loan', 'personal_loan']
   const ASSET_TYPES = ['checking', 'savings', 'cd', 'investment', 'retirement']
   const totalAssets = accounts.filter(a => ASSET_TYPES.includes(a.account_type)).reduce((s, a) => s + a.current_balance, 0)
   const totalDebt = accounts.filter(a => DEBT_TYPES.includes(a.account_type)).reduce((s, a) => s + a.current_balance, 0)
@@ -125,7 +139,7 @@ export default function AccountsPage() {
     setEditingId(a.id)
     setForm({
       nickname: a.nickname ?? '',
-      account_type: a.account_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      account_type: DB_TO_LABEL[a.account_type] ?? a.account_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
       institution_name: a.institution_name,
       last_four: a.last_four ?? '',
       current_balance: String(a.current_balance),
@@ -145,7 +159,7 @@ export default function AccountsPage() {
     if (!user || !form.institution_name) return
     setSaving(true)
     setSaveError(null)
-    const typeKey = form.account_type.toLowerCase().replace(/ /g, '_')
+    const typeKey = ACCOUNT_TYPE_MAP[form.account_type] ?? form.account_type.toLowerCase().replace(/ /g, '_')
     const payload = {
       account_type: typeKey,
       institution_name: form.institution_name,
@@ -287,7 +301,7 @@ export default function AccountsPage() {
                   </td>
                   <td className="px-5 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeBadge(a.account_type)}`}>
-                      {a.account_type.replace(/_/g, ' ')}
+                      {DB_TO_LABEL[a.account_type] ?? a.account_type.replace(/_/g, ' ')}
                     </span>
                   </td>
                   <td className="px-5 py-3">
