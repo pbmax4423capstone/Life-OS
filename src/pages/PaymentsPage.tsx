@@ -42,7 +42,7 @@ export default function PaymentsPage() {
       frequency: form.frequency.toLowerCase(),
       memo: form.memo || null,
       auto_pay: form.auto_pay,
-      status: 'active',
+      status: 'scheduled',
     }).select('*').single()
     if (!error && data) setPayments(p => [...p, data])
     setSaving(false)
@@ -126,7 +126,7 @@ export default function PaymentsPage() {
                       : <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/50">Off</span>}
                   </td>
                   <td className="px-5 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${p.status === 'active' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' : 'bg-amber-500/15 text-amber-400 border-amber-500/25'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${['active', 'scheduled'].includes(p.status) ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' : 'bg-amber-500/15 text-amber-400 border-amber-500/25'}`}>
                       {p.status}
                     </span>
                   </td>
