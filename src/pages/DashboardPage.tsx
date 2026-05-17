@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { TrendingUp, TrendingDown, Wallet, Star } from 'lucide-react'
 import { supabase, type FinancialAccount, type ScheduledPayment } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
@@ -12,6 +13,7 @@ const fmtDec = (n: number) =>
 
 export default function DashboardPage() {
   const { user } = useAuthStore()
+  const navigate = useNavigate()
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
   const [payments, setPayments] = useState<ScheduledPayment[]>([])
   const [loading, setLoading] = useState(true)
@@ -85,7 +87,7 @@ export default function DashboardPage() {
           <h2 className="text-base font-semibold text-slate-100 mb-4">Accounts</h2>
           <div className="space-y-3">
             {accounts.map(a => (
-              <div key={a.id} className="flex items-center gap-3">
+              <div key={a.id} onClick={() => navigate('/accounts')} className="flex items-center gap-3 cursor-pointer rounded-lg px-1 -mx-1 hover:bg-slate-800/40 transition-colors py-0.5">
                 <div className="w-2 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
@@ -112,7 +114,7 @@ export default function DashboardPage() {
           <h2 className="text-base font-semibold text-slate-100 mb-4">Upcoming Payments</h2>
           <div className="space-y-2">
             {payments.map(p => (
-              <div key={p.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
+              <div key={p.id} onClick={() => navigate('/payments')} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0 cursor-pointer rounded px-1 -mx-1 hover:bg-slate-800/40 transition-colors">
                 <div>
                   <div className="text-sm text-slate-200">{p.payee_name ?? 'Payment'}</div>
                   <div className="text-xs text-slate-500">Due {p.next_due_date}</div>

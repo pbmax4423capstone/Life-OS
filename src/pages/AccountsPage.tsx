@@ -264,7 +264,7 @@ export default function AccountsPage() {
             </thead>
             <tbody>
               {filtered.map(a => (
-                <tr key={a.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors last:border-0">
+                <tr key={a.id} onClick={() => openEdit(a)} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors last:border-0 cursor-pointer">
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3">
                       <div className="w-2 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
@@ -287,7 +287,7 @@ export default function AccountsPage() {
                   </td>
                   <td className="px-5 py-3 text-slate-300">{a.interest_rate ? `${a.interest_rate}%` : '—'}</td>
                   <td className="px-5 py-3 text-slate-300">{a.rewards_balance > 0 ? `${a.rewards_balance.toLocaleString()} pts` : '—'}</td>
-                  <td className="px-5 py-3">
+                  <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-3">
                       <button onClick={() => openEdit(a)} className="text-slate-600 hover:text-brand-400 transition-colors p-1">
                         <Pencil size={17} />

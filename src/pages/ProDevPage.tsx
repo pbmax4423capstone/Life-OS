@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, GraduationCap, Loader2, Sparkles } from 'lucide-react'
+import { Plus, Trash2, GraduationCap, Loader2, Sparkles, X } from 'lucide-react'
 import { supabase, type Certification } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { callAI } from '@/lib/chatService'
@@ -84,6 +84,7 @@ export default function ProDevPage() {
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState('Certifications')
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState({
     name: '', issuing_org: '', status: 'not_started', progress_pct: '',
     target_date: '', achieved_date: '', expiry_date: '',
@@ -112,6 +113,46 @@ export default function ProDevPage() {
     if (!error && data) setCerts(p => [data, ...p])
     setSaving(false)
     setShowAdd(false)
+    setForm({ name: '', issuing_org: '', status: 'not_started', progress_pct: '', target_date: '', achieved_date: '', expiry_date: '' })
+  }
+
+  const openEdit = (c: Certification) => {
+    setEditingId(c.id)
+    setForm({
+      name: c.name,
+      issuing_org: c.issuing_org || '',
+      status: c.status,
+      progress_pct: String(c.progress_pct),
+      target_date: c.target_date || '',
+      achieved_date: c.achieved_date || '',
+      expiry_date: c.expiry_date || '',
+    })
+    setShowAdd(true)
+  }
+
+  const update = async () => {
+    if (!editingId || !form.name) return
+    setSaving(true)
+    const patch = {
+      name: form.name,
+      issuing_org: form.issuing_org || null,
+      status: form.status,
+      progress_pct: parseInt(form.progress_pct) || 0,
+      target_date: form.target_date || null,
+      achieved_date: form.achieved_date || null,
+      expiry_date: form.expiry_date || null,
+    }
+    const { error } = await supabase.from('certifications').update(patch).eq('id', editingId)
+    if (!error) setCerts(p => p.map(c => c.id === editingId ? { ...c, ...patch } : c))
+    setSaving(false)
+    setShowAdd(false)
+    setEditingId(null)
+    setForm({ name: '', issuing_org: '', status: 'not_started', progress_pct: '', target_date: '', achieved_date: '', expiry_date: '' })
+  }
+
+  const closeModal = () => {
+    setShowAdd(false)
+    setEditingId(null)
     setForm({ name: '', issuing_org: '', status: 'not_started', progress_pct: '', target_date: '', achieved_date: '', expiry_date: '' })
   }
 
@@ -174,7 +215,7 @@ export default function ProDevPage() {
         ) : (
           <div className="space-y-3">
             {certs.map(c => (
-              <div key={c.id} className="card p-5">
+              <div key={c.id} onClick={() => openEdit(c)} className="card p-5 cursor-pointer hover:border-slate-600 transition-colors">
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <div className="font-semibold text-slate-100">{c.name}</div>
@@ -184,7 +225,7 @@ export default function ProDevPage() {
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusBadge(c.status)}`}>
                       {c.status.replace('_', ' ')}
                     </span>
-                    <button onClick={() => del(c.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                    <button onClick={e => { e.stopPropagation(); del(c.id) }} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                   </div>
                 </div>
                 <ProgressBar pct={c.progress_pct} color={statusColor(c.status)} />
@@ -204,7 +245,10 @@ export default function ProDevPage() {
       {showAdd && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-100 mb-5">Add Certification</h3>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-slate-100">{editingId ? 'Edit Certification' : 'Add Certification'}</h3>
+              <button onClick={closeModal} className="text-slate-400 hover:text-slate-200 p-1"><X size={18} /></button>
+            </div>
             <div className="space-y-4">
               <div>
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Certification Name *</label>
@@ -247,10 +291,10 @@ export default function ProDevPage() {
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={add} disabled={saving || !form.name} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Certification'}
+              <button onClick={editingId ? update : add} disabled={saving || !form.name} className="btn-primary flex-1 justify-center flex items-center gap-2">
+                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editingId ? 'Save Changes' : 'Save Certification'}
               </button>
-              <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
+              <button onClick={closeModal} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>

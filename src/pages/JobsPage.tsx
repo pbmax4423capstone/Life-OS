@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Briefcase, Loader2, Sparkles } from 'lucide-react'
+import { Plus, Trash2, Briefcase, Loader2, Sparkles, X } from 'lucide-react'
 import { supabase, type JobApplication } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { callAI } from '@/lib/chatService'
@@ -89,6 +89,7 @@ export default function JobsPage() {
   const [tab, setTab] = useState('Pipeline')
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState({
     company_name: '', job_title: '', status: 'applied',
     applied_date: new Date().toISOString().split('T')[0],
@@ -124,6 +125,50 @@ export default function JobsPage() {
     if (!error && data) setJobs(p => [data, ...p])
     setSaving(false)
     setShowAdd(false)
+    setForm({ company_name: '', job_title: '', status: 'applied', applied_date: new Date().toISOString().split('T')[0], salary_min: '', salary_max: '', location: '', remote_type: 'hybrid', notes: '' })
+  }
+
+  const openEdit = (j: JobApplication) => {
+    setEditingId(j.id)
+    setForm({
+      company_name: j.company_name,
+      job_title: j.job_title,
+      status: j.status,
+      applied_date: j.applied_date || new Date().toISOString().split('T')[0],
+      salary_min: j.salary_min ? String(j.salary_min) : '',
+      salary_max: j.salary_max ? String(j.salary_max) : '',
+      location: j.location || '',
+      remote_type: j.remote_type || 'hybrid',
+      notes: j.notes || '',
+    })
+    setShowAdd(true)
+  }
+
+  const update = async () => {
+    if (!editingId || !form.company_name || !form.job_title) return
+    setSaving(true)
+    const patch = {
+      company_name: form.company_name,
+      job_title: form.job_title,
+      status: form.status,
+      applied_date: form.applied_date || null,
+      salary_min: parseFloat(form.salary_min) || null,
+      salary_max: parseFloat(form.salary_max) || null,
+      location: form.location || null,
+      remote_type: form.remote_type || null,
+      notes: form.notes || null,
+    }
+    const { error } = await supabase.from('job_applications').update(patch).eq('id', editingId)
+    if (!error) setJobs(p => p.map(j => j.id === editingId ? { ...j, ...patch } : j))
+    setSaving(false)
+    setShowAdd(false)
+    setEditingId(null)
+    setForm({ company_name: '', job_title: '', status: 'applied', applied_date: new Date().toISOString().split('T')[0], salary_min: '', salary_max: '', location: '', remote_type: 'hybrid', notes: '' })
+  }
+
+  const closeModal = () => {
+    setShowAdd(false)
+    setEditingId(null)
     setForm({ company_name: '', job_title: '', status: 'applied', applied_date: new Date().toISOString().split('T')[0], salary_min: '', salary_max: '', location: '', remote_type: 'hybrid', notes: '' })
   }
 
@@ -191,7 +236,7 @@ export default function JobsPage() {
                 {jobs.map(j => {
                   const st = STATUS_MAP[j.status] ?? STATUS_MAP.applied
                   return (
-                    <tr key={j.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0">
+                    <tr key={j.id} onClick={() => openEdit(j)} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0 cursor-pointer">
                       <td className="px-5 py-3 font-medium text-slate-200">{j.company_name}</td>
                       <td className="px-5 py-3 text-slate-300">{j.job_title}</td>
                       <td className="px-5 py-3">
@@ -203,7 +248,7 @@ export default function JobsPage() {
                       </td>
                       <td className="px-5 py-3 text-slate-400 text-xs">{j.location ? `${j.location}${j.remote_type ? ` (${j.remote_type})` : ''}` : '—'}</td>
                       <td className="px-5 py-3 text-slate-500 text-xs max-w-[160px] truncate">{j.notes ?? '—'}</td>
-                      <td className="px-5 py-3">
+                      <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
                         <button onClick={() => del(j.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                       </td>
                     </tr>
@@ -220,7 +265,10 @@ export default function JobsPage() {
       {showAdd && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-bold text-slate-100 mb-5">Add Application</h3>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-slate-100">{editingId ? 'Edit Application' : 'Add Application'}</h3>
+              <button onClick={closeModal} className="text-slate-400 hover:text-slate-200 p-1"><X size={18} /></button>
+            </div>
             <div className="space-y-4">
               <div>
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Company *</label>
@@ -270,10 +318,10 @@ export default function JobsPage() {
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={add} disabled={saving || !form.company_name || !form.job_title} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Application'}
+              <button onClick={editingId ? update : add} disabled={saving || !form.company_name || !form.job_title} className="btn-primary flex-1 justify-center flex items-center gap-2">
+                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editingId ? 'Save Changes' : 'Save Application'}
               </button>
-              <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
+              <button onClick={closeModal} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>

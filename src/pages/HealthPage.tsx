@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Heart, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Heart, Loader2, X } from 'lucide-react'
 import { supabase, type Appointment, type InsuranceClaim } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -24,6 +24,8 @@ export default function HealthPage() {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editApptId, setEditApptId] = useState<string | null>(null)
+  const [editClaimId, setEditClaimId] = useState<string | null>(null)
 
   const [apptForm, setApptForm] = useState({
     member_id: 'Patrick', reason: '', appointment_type: 'Primary Care',
@@ -66,6 +68,42 @@ export default function HealthPage() {
     setApptForm({ member_id: 'Patrick', reason: '', appointment_type: 'Primary Care', appointment_date: '', appointment_time: '', location: '', status: 'scheduled', telehealth: false })
   }
 
+  const openEditAppt = (a: Appointment) => {
+    setEditApptId(a.id)
+    setApptForm({
+      member_id: a.member_id || 'Patrick',
+      reason: a.reason || '',
+      appointment_type: a.appointment_type,
+      appointment_date: a.appointment_date,
+      appointment_time: a.appointment_time || '',
+      location: a.location || '',
+      status: a.status,
+      telehealth: a.telehealth,
+    })
+    setShowAdd(true)
+  }
+
+  const updateAppt = async () => {
+    if (!editApptId || !apptForm.appointment_date) return
+    setSaving(true)
+    const patch = {
+      member_id: apptForm.member_id,
+      appointment_type: apptForm.appointment_type,
+      reason: apptForm.reason || null,
+      appointment_date: apptForm.appointment_date,
+      appointment_time: apptForm.appointment_time || null,
+      location: apptForm.location || null,
+      status: apptForm.status,
+      telehealth: apptForm.telehealth,
+    }
+    const { error } = await supabase.from('appointments').update(patch).eq('id', editApptId)
+    if (!error) setAppts(p => p.map(a => a.id === editApptId ? { ...a, ...patch } : a))
+    setSaving(false)
+    setShowAdd(false)
+    setEditApptId(null)
+    setApptForm({ member_id: 'Patrick', reason: '', appointment_type: 'Primary Care', appointment_date: '', appointment_time: '', location: '', status: 'scheduled', telehealth: false })
+  }
+
   const addClaim = async () => {
     if (!user || !claimForm.service_date || !claimForm.service_description) return
     setSaving(true)
@@ -85,6 +123,40 @@ export default function HealthPage() {
     setClaimForm({ policy_id: 'BCBS', service_date: '', service_description: '', billed_amount: '', covered_amount: '', patient_owed: '', status: 'pending' })
   }
 
+  const openEditClaim = (c: InsuranceClaim) => {
+    setEditClaimId(c.id)
+    setClaimForm({
+      policy_id: c.policy_id,
+      service_date: c.service_date,
+      service_description: c.service_description,
+      billed_amount: String(c.billed_amount),
+      covered_amount: c.covered_amount != null ? String(c.covered_amount) : '',
+      patient_owed: c.patient_owed != null ? String(c.patient_owed) : '',
+      status: c.status,
+    })
+    setShowAdd(true)
+  }
+
+  const updateClaim = async () => {
+    if (!editClaimId || !claimForm.service_date) return
+    setSaving(true)
+    const patch = {
+      policy_id: claimForm.policy_id,
+      service_date: claimForm.service_date,
+      service_description: claimForm.service_description,
+      billed_amount: parseFloat(claimForm.billed_amount) || 0,
+      covered_amount: parseFloat(claimForm.covered_amount) || null,
+      patient_owed: parseFloat(claimForm.patient_owed) || null,
+      status: claimForm.status,
+    }
+    const { error } = await supabase.from('insurance_claims').update(patch).eq('id', editClaimId)
+    if (!error) setClaims(p => p.map(c => c.id === editClaimId ? { ...c, ...patch } : c))
+    setSaving(false)
+    setShowAdd(false)
+    setEditClaimId(null)
+    setClaimForm({ policy_id: 'BCBS', service_date: '', service_description: '', billed_amount: '', covered_amount: '', patient_owed: '', status: 'pending' })
+  }
+
   const delAppt = async (id: string) => {
     await supabase.from('appointments').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     setAppts(p => p.filter(a => a.id !== id))
@@ -92,6 +164,14 @@ export default function HealthPage() {
   const delClaim = async (id: string) => {
     await supabase.from('insurance_claims').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     setClaims(p => p.filter(c => c.id !== id))
+  }
+
+  const closeModal = () => {
+    setShowAdd(false)
+    setEditApptId(null)
+    setEditClaimId(null)
+    setApptForm({ member_id: 'Patrick', reason: '', appointment_type: 'Primary Care', appointment_date: '', appointment_time: '', location: '', status: 'scheduled', telehealth: false })
+    setClaimForm({ policy_id: 'BCBS', service_date: '', service_description: '', billed_amount: '', covered_amount: '', patient_owed: '', status: 'pending' })
   }
 
   const nextAppt = appts.filter(a => a.appointment_date >= new Date().toISOString().split('T')[0])[0]
@@ -160,7 +240,7 @@ export default function HealthPage() {
               </thead>
               <tbody>
                 {appts.map(a => (
-                  <tr key={a.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0">
+                  <tr key={a.id} onClick={() => openEditAppt(a)} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0 cursor-pointer">
                     <td className="px-5 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.member_id === 'Patrick' ? 'bg-indigo-500/15 text-indigo-400 border-indigo-500/25' : 'bg-purple-500/15 text-purple-400 border-purple-500/25'}`}>
                         {a.member_id ?? 'Self'}
@@ -173,7 +253,7 @@ export default function HealthPage() {
                     <td className="px-5 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusBadge(a.status)}`}>{a.status}</span>
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
                       <button onClick={() => delAppt(a.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                     </td>
                   </tr>
@@ -203,7 +283,7 @@ export default function HealthPage() {
               </thead>
               <tbody>
                 {claims.map(c => (
-                  <tr key={c.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0">
+                  <tr key={c.id} onClick={() => openEditClaim(c)} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0 cursor-pointer">
                     <td className="px-5 py-3 font-medium text-slate-200">{c.policy_id}</td>
                     <td className="px-5 py-3 text-slate-300">{c.service_description}</td>
                     <td className="px-5 py-3 text-slate-400">{c.service_date}</td>
@@ -215,7 +295,7 @@ export default function HealthPage() {
                     <td className="px-5 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusBadge(c.status)}`}>{c.status}</span>
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
                       <button onClick={() => delClaim(c.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                     </td>
                   </tr>
@@ -284,7 +364,10 @@ export default function HealthPage() {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             {tab === 'Appointments' ? (
               <>
-                <h3 className="text-lg font-bold text-slate-100 mb-5">Add Appointment</h3>
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="text-lg font-bold text-slate-100">{editApptId ? 'Edit Appointment' : 'Add Appointment'}</h3>
+                  <button onClick={closeModal} className="text-slate-400 hover:text-slate-200 p-1"><X size={18} /></button>
+                </div>
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -320,15 +403,18 @@ export default function HealthPage() {
                   </div>
                 </div>
                 <div className="flex gap-3 mt-6">
-                  <button onClick={addAppt} disabled={saving || !apptForm.appointment_date} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                    {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Appointment'}
+                  <button onClick={editApptId ? updateAppt : addAppt} disabled={saving || !apptForm.appointment_date} className="btn-primary flex-1 justify-center flex items-center gap-2">
+                    {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editApptId ? 'Save Changes' : 'Save Appointment'}
                   </button>
-                  <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
+                  <button onClick={closeModal} className="btn-ghost">Cancel</button>
                 </div>
               </>
             ) : (
               <>
-                <h3 className="text-lg font-bold text-slate-100 mb-5">Add Insurance Claim</h3>
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="text-lg font-bold text-slate-100">{editClaimId ? 'Edit Claim' : 'Add Insurance Claim'}</h3>
+                  <button onClick={closeModal} className="text-slate-400 hover:text-slate-200 p-1"><X size={18} /></button>
+                </div>
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -360,10 +446,10 @@ export default function HealthPage() {
                   </div>
                 </div>
                 <div className="flex gap-3 mt-6">
-                  <button onClick={addClaim} disabled={saving || !claimForm.service_date} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                    {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Claim'}
+                  <button onClick={editClaimId ? updateClaim : addClaim} disabled={saving || !claimForm.service_date} className="btn-primary flex-1 justify-center flex items-center gap-2">
+                    {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editClaimId ? 'Save Changes' : 'Save Claim'}
                   </button>
-                  <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
+                  <button onClick={closeModal} className="btn-ghost">Cancel</button>
                 </div>
               </>
             )}

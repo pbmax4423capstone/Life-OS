@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Plane, Star, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Plane, Star, Loader2, X } from 'lucide-react'
 import { supabase, type LoyaltyProgram, type Flight } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -14,6 +14,8 @@ export default function TravelPage() {
   const [tab, setTab] = useState('Miles Programs')
   const [modal, setModal] = useState<'miles' | 'flight' | null>(null)
   const [saving, setSaving] = useState(false)
+  const [editingMilesId, setEditingMilesId] = useState<string | null>(null)
+  const [editingFlightId, setEditingFlightId] = useState<string | null>(null)
 
   const [milesForm, setMilesForm] = useState({
     program_name: '', program_type: 'airline', airline_code: '',
@@ -62,6 +64,40 @@ export default function TravelPage() {
     setMilesForm({ program_name: '', program_type: 'airline', airline_code: '', member_number: '', miles_balance: '', expiry_date: '', color: '#6366f1' })
   }
 
+  const openEditMiles = (m: LoyaltyProgram) => {
+    setEditingMilesId(m.id)
+    setMilesForm({
+      program_name: m.program_name,
+      program_type: m.program_type,
+      airline_code: m.airline_code || '',
+      member_number: m.member_number || '',
+      miles_balance: String(m.miles_balance),
+      expiry_date: m.expiry_date || '',
+      color: m.color,
+    })
+    setModal('miles')
+  }
+
+  const updateMiles = async () => {
+    if (!editingMilesId || !milesForm.program_name) return
+    setSaving(true)
+    const patch = {
+      program_name: milesForm.program_name,
+      program_type: milesForm.program_type,
+      airline_code: milesForm.airline_code || null,
+      member_number: milesForm.member_number || null,
+      miles_balance: parseInt(milesForm.miles_balance) || 0,
+      expiry_date: milesForm.expiry_date || null,
+      color: milesForm.color,
+    }
+    const { error } = await supabase.from('loyalty_programs').update(patch).eq('id', editingMilesId)
+    if (!error) setMiles(p => p.map(m => m.id === editingMilesId ? { ...m, ...patch } : m))
+    setSaving(false)
+    setModal(null)
+    setEditingMilesId(null)
+    setMilesForm({ program_name: '', program_type: 'airline', airline_code: '', member_number: '', miles_balance: '', expiry_date: '', color: '#6366f1' })
+  }
+
   const addFlight = async () => {
     if (!user || !flightForm.origin_code || !flightForm.destination_code || !flightForm.departure_datetime) return
     setSaving(true)
@@ -86,6 +122,46 @@ export default function TravelPage() {
     setFlightForm({ passenger_name: 'Patrick', airline: '', flight_number: '', origin_code: '', destination_code: '', departure_datetime: '', status: 'confirmed', cabin_class: 'economy', seat_number: '', confirmation_code: '' })
   }
 
+  const openEditFlight = (f: Flight) => {
+    setEditingFlightId(f.id)
+    setFlightForm({
+      passenger_name: f.passenger_name,
+      airline: f.airline,
+      flight_number: f.flight_number,
+      origin_code: f.origin_code,
+      destination_code: f.destination_code,
+      departure_datetime: f.departure_datetime.slice(0, 16),
+      status: f.status,
+      cabin_class: f.cabin_class,
+      seat_number: f.seat_number || '',
+      confirmation_code: f.confirmation_code || '',
+    })
+    setModal('flight')
+  }
+
+  const updateFlight = async () => {
+    if (!editingFlightId || !flightForm.departure_datetime) return
+    setSaving(true)
+    const patch = {
+      passenger_name: flightForm.passenger_name,
+      airline: flightForm.airline || 'Unknown',
+      flight_number: flightForm.flight_number || 'TBD',
+      origin_code: flightForm.origin_code.toUpperCase(),
+      destination_code: flightForm.destination_code.toUpperCase(),
+      departure_datetime: flightForm.departure_datetime,
+      status: flightForm.status,
+      cabin_class: flightForm.cabin_class,
+      seat_number: flightForm.seat_number || null,
+      confirmation_code: flightForm.confirmation_code || null,
+    }
+    const { error } = await supabase.from('flights').update(patch).eq('id', editingFlightId)
+    if (!error) setFlights(p => p.map(f => f.id === editingFlightId ? { ...f, ...patch } : f))
+    setSaving(false)
+    setModal(null)
+    setEditingFlightId(null)
+    setFlightForm({ passenger_name: 'Patrick', airline: '', flight_number: '', origin_code: '', destination_code: '', departure_datetime: '', status: 'confirmed', cabin_class: 'economy', seat_number: '', confirmation_code: '' })
+  }
+
   const delMiles = async (id: string) => {
     await supabase.from('loyalty_programs').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     setMiles(p => p.filter(m => m.id !== id))
@@ -93,6 +169,17 @@ export default function TravelPage() {
   const delFlight = async (id: string) => {
     await supabase.from('flights').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     setFlights(p => p.filter(f => f.id !== id))
+  }
+
+  const closeMilesModal = () => {
+    setModal(null)
+    setEditingMilesId(null)
+    setMilesForm({ program_name: '', program_type: 'airline', airline_code: '', member_number: '', miles_balance: '', expiry_date: '', color: '#6366f1' })
+  }
+  const closeFlightModal = () => {
+    setModal(null)
+    setEditingFlightId(null)
+    setFlightForm({ passenger_name: 'Patrick', airline: '', flight_number: '', origin_code: '', destination_code: '', departure_datetime: '', status: 'confirmed', cabin_class: 'economy', seat_number: '', confirmation_code: '' })
   }
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-500" size={32} /></div>
@@ -150,13 +237,13 @@ export default function TravelPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {miles.map(m => (
-              <div key={m.id} className="card p-5">
+              <div key={m.id} onClick={() => openEditMiles(m)} className="card p-5 cursor-pointer hover:border-slate-600 transition-colors">
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <div className="font-semibold text-slate-100">{m.program_name}</div>
                     {m.airline_code && <div className="text-xs text-slate-500">{m.airline_code}</div>}
                   </div>
-                  <button onClick={() => delMiles(m.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                  <button onClick={e => { e.stopPropagation(); delMiles(m.id) }} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                 </div>
                 <div className="text-3xl font-bold mb-1" style={{ color: m.color }}>
                   {m.miles_balance.toLocaleString()}
@@ -196,7 +283,7 @@ export default function TravelPage() {
               </thead>
               <tbody>
                 {flights.map(f => (
-                  <tr key={f.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0">
+                  <tr key={f.id} onClick={() => openEditFlight(f)} className="border-b border-slate-800/50 hover:bg-slate-800/30 last:border-0 cursor-pointer">
                     <td className="px-5 py-3">
                       <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/25">{f.passenger_name}</span>
                     </td>
@@ -209,7 +296,7 @@ export default function TravelPage() {
                     <td className="px-5 py-3">
                       <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">{f.status}</span>
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
                       <button onClick={() => delFlight(f.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                     </td>
                   </tr>
@@ -223,7 +310,10 @@ export default function TravelPage() {
       {modal === 'miles' && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-100 mb-5">Add Miles Program</h3>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-slate-100">{editingMilesId ? 'Edit Miles Program' : 'Add Miles Program'}</h3>
+              <button onClick={closeMilesModal} className="text-slate-400 hover:text-slate-200 p-1"><X size={18} /></button>
+            </div>
             <div className="space-y-4">
               <div>
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Program Name *</label>
@@ -251,10 +341,10 @@ export default function TravelPage() {
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={addMiles} disabled={saving || !milesForm.program_name} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Program'}
+              <button onClick={editingMilesId ? updateMiles : addMiles} disabled={saving || !milesForm.program_name} className="btn-primary flex-1 justify-center flex items-center gap-2">
+                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editingMilesId ? 'Save Changes' : 'Save Program'}
               </button>
-              <button onClick={() => setModal(null)} className="btn-ghost">Cancel</button>
+              <button onClick={closeMilesModal} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>
@@ -263,7 +353,10 @@ export default function TravelPage() {
       {modal === 'flight' && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-100 mb-5">Add Flight</h3>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-slate-100">{editingFlightId ? 'Edit Flight' : 'Add Flight'}</h3>
+              <button onClick={closeFlightModal} className="text-slate-400 hover:text-slate-200 p-1"><X size={18} /></button>
+            </div>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -315,10 +408,10 @@ export default function TravelPage() {
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={addFlight} disabled={saving || !flightForm.departure_datetime} className="btn-primary flex-1 justify-center flex items-center gap-2">
-                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Flight'}
+              <button onClick={editingFlightId ? updateFlight : addFlight} disabled={saving || !flightForm.departure_datetime} className="btn-primary flex-1 justify-center flex items-center gap-2">
+                {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editingFlightId ? 'Save Changes' : 'Save Flight'}
               </button>
-              <button onClick={() => setModal(null)} className="btn-ghost">Cancel</button>
+              <button onClick={closeFlightModal} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>
