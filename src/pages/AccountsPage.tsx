@@ -289,27 +289,47 @@ export default function AccountsPage() {
 
     // Save scheduled payment for debt accounts
     if (isDebt && accountId && form.payment_amount) {
-      const pmtPayload = {
-        owner_id: user.id,
-        from_account_id: accountId,
-        payee_name: form.nickname || form.institution_name,
-        amount: parseFloat(form.payment_amount) || 0,
-        frequency: form.payment_interval.toLowerCase(),
-        next_due_date: form.next_due_date || new Date().toISOString().split('T')[0],
-        auto_pay: form.auto_pay,
-        status: 'active' as const,
-        memo: form.payments_remaining ? `payments_remaining:${form.payments_remaining}` : null,
-      }
+      const pmtAmount = parseFloat(form.payment_amount)
+      if (pmtAmount > 0) {
+        const existingPmt = payments[accountId]
+        const memo = form.payments_remaining ? `payments_remaining:${form.payments_remaining}` : null
 
-      const existingPmt = payments[accountId]
-      if (existingPmt) {
-        const { data: pmtData } = await supabase.from('scheduled_payments')
-          .update(pmtPayload).eq('id', existingPmt.id).select('*').single()
-        if (pmtData) setPayments(p => ({ ...p, [accountId!]: pmtData }))
-      } else {
-        const { data: pmtData } = await supabase.from('scheduled_payments')
-          .insert(pmtPayload).select('*').single()
-        if (pmtData) setPayments(p => ({ ...p, [accountId!]: pmtData }))
+        if (existingPmt) {
+          const { data: pmtData, error: pmtError } = await supabase.from('scheduled_payments')
+            .update({
+              payee_name: form.nickname || form.institution_name,
+              amount: pmtAmount,
+              frequency: form.payment_interval.toLowerCase(),
+              next_due_date: form.next_due_date || new Date().toISOString().split('T')[0],
+              auto_pay: form.auto_pay,
+              memo,
+            }).eq('id', existingPmt.id).select('*').single()
+          if (pmtError) {
+            setSaving(false)
+            setSaveError(`Account saved, but payment details failed: ${pmtError.message}`)
+            return
+          }
+          if (pmtData) setPayments(p => ({ ...p, [accountId!]: pmtData }))
+        } else {
+          const { data: pmtData, error: pmtError } = await supabase.from('scheduled_payments')
+            .insert({
+              owner_id: user.id,
+              from_account_id: accountId,
+              payee_name: form.nickname || form.institution_name,
+              amount: pmtAmount,
+              frequency: form.payment_interval.toLowerCase(),
+              next_due_date: form.next_due_date || new Date().toISOString().split('T')[0],
+              auto_pay: form.auto_pay,
+              status: 'active',
+              memo,
+            }).select('*').single()
+          if (pmtError) {
+            setSaving(false)
+            setSaveError(`Account saved, but payment details failed: ${pmtError.message}`)
+            return
+          }
+          if (pmtData) setPayments(p => ({ ...p, [accountId!]: pmtData }))
+        }
       }
     }
 
