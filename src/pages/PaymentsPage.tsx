@@ -1,19 +1,35 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Calendar, Loader2, X } from 'lucide-react'
+import { Plus, Trash2, Calendar, Loader2, X, CheckCircle2 } from 'lucide-react'
 import { supabase, type ScheduledPayment, type FinancialAccount } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)
 
+const fmtDateDisplay = (iso: string) =>
+  new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
 const FREQUENCIES = ['Once', 'Weekly', 'Biweekly', 'Monthly', 'Quarterly', 'Annually']
-const CATEGORIES = ['Credit Card', 'Mortgage', 'Auto Loan', 'Student Loan', 'Utility', 'Insurance', 'Subscription', 'Other']
+
+function advanceDueDate(dueDate: string, frequency: string): string {
+  const d = new Date(dueDate + 'T00:00:00')
+  const freq = frequency.toLowerCase()
+  if (freq === 'weekly') d.setDate(d.getDate() + 7)
+  else if (freq === 'biweekly') d.setDate(d.getDate() + 14)
+  else if (freq === 'monthly') d.setMonth(d.getMonth() + 1)
+  else if (freq === 'quarterly') d.setMonth(d.getMonth() + 3)
+  else if (freq === 'annually') d.setFullYear(d.getFullYear() + 1)
+  return d.toISOString().split('T')[0]
+}
 
 export default function PaymentsPage() {
   const { user } = useAuthStore()
   const [payments, setPayments] = useState<ScheduledPayment[]>([])
   const [accounts, setAccounts] = useState<FinancialAccount[]>([])
+  const [allAccounts, setAllAccounts] = useState<FinancialAccount[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Add / Edit modal
   const [showAdd, setShowAdd] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -23,6 +39,12 @@ export default function PaymentsPage() {
     frequency: 'Monthly', memo: '', auto_pay: false,
   })
 
+  // Mark as Paid modal
+  const [showPayModal, setShowPayModal] = useState(false)
+  const [selectedPayment, setSelectedPayment] = useState<ScheduledPayment | null>(null)
+  const [payFromAccountId, setPayFromAccountId] = useState('')
+  const [marking, setMarking] = useState(false)
+
   useEffect(() => {
     if (!user) { setLoading(false); return }
     const load = async () => {
@@ -30,19 +52,24 @@ export default function PaymentsPage() {
         supabase.from('scheduled_payments').select('*')
           .eq('owner_id', user.id).is('deleted_at', null).order('next_due_date'),
         supabase.from('financial_accounts').select('*')
-          .eq('owner_id', user.id).is('deleted_at', null)
-          .in('account_type', ['Checking', 'Savings']).order('sort_order')
+          .eq('owner_id', user.id).is('deleted_at', null).order('sort_order'),
       ])
       setPayments(pmts ?? [])
-      setAccounts(accs ?? [])
+      const allAccs = accs ?? []
+      setAllAccounts(allAccs)
+      // Source accounts for the "paid from" dropdown: checking + savings
+      setAccounts(allAccs.filter(a => ['checking', 'savings'].includes(a.account_type.toLowerCase())))
       setLoading(false)
     }
     load()
   }, [user])
 
   const total = payments.reduce((s, p) => s + p.amount, 0)
-  const nextDue = payments.sort((a, b) => a.next_due_date.localeCompare(b.next_due_date))[0]
+  const nextDue = [...payments].sort((a, b) => a.next_due_date.localeCompare(b.next_due_date))[0]
 
+  const blankForm = () => ({ payee_name: '', amount: '', next_due_date: '', from_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false })
+
+  // ── Add ──
   const add = async () => {
     if (!user || !form.payee_name || !form.amount) return
     setSaving(true)
@@ -60,9 +87,10 @@ export default function PaymentsPage() {
     if (!error && data) setPayments(p => [...p, data])
     setSaving(false)
     setShowAdd(false)
-    setForm({ payee_name: '', amount: '', next_due_date: '', from_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false })
+    setForm(blankForm())
   }
 
+  // ── Edit ──
   const edit = (payment: ScheduledPayment) => {
     setEditingId(payment.id)
     setForm({
@@ -80,7 +108,7 @@ export default function PaymentsPage() {
   const update = async () => {
     if (!editingId || !form.payee_name || !form.amount) return
     setSaving(true)
-    const { error } = await supabase.from('scheduled_payments').update({
+    const updates = {
       from_account_id: form.from_account_id,
       payee_name: form.payee_name,
       amount: parseFloat(form.amount),
@@ -88,19 +116,82 @@ export default function PaymentsPage() {
       frequency: form.frequency.toLowerCase(),
       memo: form.memo || null,
       auto_pay: form.auto_pay,
-    }).eq('id', editingId)
+    }
+    const { error } = await supabase.from('scheduled_payments').update(updates).eq('id', editingId)
     if (!error) {
-      setPayments(p => p.map(x => x.id === editingId ? { ...x, from_account_id: form.from_account_id, payee_name: form.payee_name, amount: parseFloat(form.amount), next_due_date: form.next_due_date, frequency: form.frequency.toLowerCase(), memo: form.memo || null, auto_pay: form.auto_pay } : x))
+      setPayments(p => p.map(x => x.id === editingId ? { ...x, ...updates } : x))
     }
     setSaving(false)
     setShowEdit(false)
     setEditingId(null)
-    setForm({ payee_name: '', amount: '', next_due_date: '', from_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false })
+    setForm(blankForm())
   }
 
+  // ── Delete ──
   const del = async (id: string) => {
     await supabase.from('scheduled_payments').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     setPayments(p => p.filter(x => x.id !== id))
+  }
+
+  // ── Mark as Paid ──
+  const openPayModal = (payment: ScheduledPayment, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedPayment(payment)
+    setPayFromAccountId(payment.from_account_id || '')
+    setShowPayModal(true)
+  }
+
+  const closePayModal = () => {
+    setShowPayModal(false)
+    setSelectedPayment(null)
+    setPayFromAccountId('')
+  }
+
+  const markAsPaid = async () => {
+    if (!selectedPayment) return
+    setMarking(true)
+    try {
+      const isOneTime = selectedPayment.frequency.toLowerCase() === 'once'
+      const updates: Record<string, unknown> = {
+        from_account_id: payFromAccountId || selectedPayment.from_account_id,
+        updated_at: new Date().toISOString(),
+      }
+      if (isOneTime) {
+        updates.status = 'paid'
+        updates.deleted_at = new Date().toISOString()
+      } else {
+        updates.next_due_date = advanceDueDate(selectedPayment.next_due_date, selectedPayment.frequency)
+      }
+
+      const { error } = await supabase
+        .from('scheduled_payments')
+        .update(updates)
+        .eq('id', selectedPayment.id)
+
+      if (!error) {
+        if (isOneTime) {
+          setPayments(ps => ps.filter(p => p.id !== selectedPayment.id))
+        } else {
+          setPayments(ps => ps.map(p =>
+            p.id === selectedPayment.id
+              ? { ...p, ...updates, next_due_date: updates.next_due_date as string }
+              : p
+          ))
+        }
+      }
+    } finally {
+      setMarking(false)
+      closePayModal()
+    }
+  }
+
+  // Source accounts for the "paid from" selector
+  const paySourceAccounts = accounts.length > 0 ? accounts : allAccounts
+
+  const accountLabel = (id: string) => {
+    const a = allAccounts.find(a => a.id === id)
+    if (!a) return null
+    return a.nickname || `${a.institution_name}${a.last_four ? ` ····${a.last_four}` : ''}`
   }
 
   if (loading) return (
@@ -153,33 +244,55 @@ export default function PaymentsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-800">
-                {['Payee', 'Amount', 'Due Date', 'Frequency', 'Auto-Pay', 'Status', ''].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400 px-5 py-3">{h}</th>
+                {['Payee', 'Amount', 'Due Date', 'Frequency', 'Paid From', 'Auto-Pay', 'Status', ''].map(h => (
+                  <th key={h} className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400 px-4 py-3">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {payments.map(p => (
-                <tr key={p.id} onClick={() => edit(p)} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors last:border-0 cursor-pointer">
-                  <td className="px-5 py-3">
+                <tr
+                  key={p.id}
+                  onClick={() => edit(p)}
+                  className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors last:border-0 cursor-pointer"
+                >
+                  <td className="px-4 py-3">
                     <div className="font-medium text-slate-200">{p.payee_name ?? 'Payment'}</div>
                     {p.memo && <div className="text-xs text-slate-500">{p.memo}</div>}
                   </td>
-                  <td className="px-5 py-3 font-semibold text-slate-200">{fmt(p.amount)}</td>
-                  <td className="px-5 py-3 text-slate-300">{p.next_due_date}</td>
-                  <td className="px-5 py-3 text-slate-300 capitalize">{p.frequency}</td>
-                  <td className="px-5 py-3">
+                  <td className="px-4 py-3 font-semibold text-slate-200">{fmt(p.amount)}</td>
+                  <td className="px-4 py-3 text-slate-300">{p.next_due_date}</td>
+                  <td className="px-4 py-3 text-slate-300 capitalize">{p.frequency}</td>
+                  <td className="px-4 py-3 text-slate-400 text-xs">
+                    {accountLabel(p.from_account_id) ?? <span className="text-slate-600">—</span>}
+                  </td>
+                  <td className="px-4 py-3">
                     {p.auto_pay
                       ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">On</span>
                       : <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/50">Off</span>}
                   </td>
-                  <td className="px-5 py-3">
+                  <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${p.status === 'active' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' : 'bg-amber-500/15 text-amber-400 border-amber-500/25'}`}>
                       {p.status}
                     </span>
                   </td>
-                  <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => del(p.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={e => openPayModal(p, e)}
+                        title="Mark as Paid"
+                        className="text-slate-600 hover:text-emerald-400 transition-colors p-1 rounded"
+                      >
+                        <CheckCircle2 size={15} />
+                      </button>
+                      <button
+                        onClick={() => del(p.id)}
+                        title="Delete"
+                        className="text-slate-600 hover:text-red-400 transition-colors p-1 rounded"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -188,6 +301,7 @@ export default function PaymentsPage() {
         </div>
       )}
 
+      {/* ── Add Modal ───────────────────────────────────────────────────── */}
       {showAdd && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
@@ -214,7 +328,11 @@ export default function PaymentsPage() {
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Source</label>
                 <select value={form.from_account_id} onChange={e => setForm(p => ({ ...p, from_account_id: e.target.value }))} className="input-base">
                   <option value="">Select account…</option>
-                  {accounts.map(a => <option key={a.id} value={a.id}>{a.nickname || `${a.account_type} - ${a.last_four || a.institution_name}`}</option>)}
+                  {allAccounts.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.nickname || `${a.institution_name}${a.last_four ? ` ····${a.last_four}` : ''}`}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -240,18 +358,19 @@ export default function PaymentsPage() {
               <button onClick={add} disabled={saving || !form.payee_name || !form.amount} className="btn-primary flex-1 justify-center flex items-center gap-2">
                 {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Payment'}
               </button>
-              <button onClick={() => setShowAdd(false)} className="btn-ghost">Cancel</button>
+              <button onClick={() => { setShowAdd(false); setForm(blankForm()) }} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>
       )}
 
+      {/* ── Edit Modal ──────────────────────────────────────────────────── */}
       {showEdit && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-bold text-slate-100">Edit Payment</h3>
-              <button onClick={() => { setShowEdit(false); setEditingId(null); setForm({ payee_name: '', amount: '', next_due_date: '', from_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false }) }} className="text-slate-400 hover:text-slate-200 p-1"><X size={18} /></button>
+              <button onClick={() => { setShowEdit(false); setEditingId(null); setForm(blankForm()) }} className="text-slate-400 hover:text-slate-200 p-1"><X size={18} /></button>
             </div>
             <div className="space-y-4">
               <div>
@@ -275,7 +394,11 @@ export default function PaymentsPage() {
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Payment Source</label>
                 <select value={form.from_account_id} onChange={e => setForm(p => ({ ...p, from_account_id: e.target.value }))} className="input-base">
                   <option value="">Select account…</option>
-                  {accounts.map(a => <option key={a.id} value={a.id}>{a.nickname || `${a.account_type} - ${a.last_four || a.institution_name}`}</option>)}
+                  {allAccounts.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.nickname || `${a.institution_name}${a.last_four ? ` ····${a.last_four}` : ''}`}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -301,7 +424,88 @@ export default function PaymentsPage() {
               <button onClick={update} disabled={saving || !form.payee_name || !form.amount} className="btn-primary flex-1 justify-center flex items-center gap-2">
                 {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save Changes'}
               </button>
-              <button onClick={() => { setShowEdit(false); setEditingId(null); setForm({ payee_name: '', amount: '', next_due_date: '', from_account_id: '', frequency: 'Monthly', memo: '', auto_pay: false }) }} className="btn-ghost">Cancel</button>
+              <button onClick={() => { setShowEdit(false); setEditingId(null); setForm(blankForm()) }} className="btn-ghost">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mark as Paid Modal ──────────────────────────────────────────── */}
+      {showPayModal && selectedPayment && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-slate-100">Mark as Paid</h3>
+              <button onClick={closePayModal} className="text-slate-400 hover:text-slate-200 transition-colors p-1">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Payment summary */}
+            <div className="bg-slate-800/60 rounded-xl p-4 mb-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-base font-semibold text-slate-100">{selectedPayment.payee_name ?? 'Payment'}</div>
+                  <div className="text-xs text-slate-400 mt-1">
+                    Due {fmtDateDisplay(selectedPayment.next_due_date)}
+                    {' · '}
+                    <span className="capitalize">{selectedPayment.frequency}</span>
+                  </div>
+                  {selectedPayment.memo && (
+                    <div className="text-xs text-slate-500 mt-0.5">{selectedPayment.memo}</div>
+                  )}
+                </div>
+                <div className="text-xl font-bold text-slate-100 flex-shrink-0">{fmt(selectedPayment.amount)}</div>
+              </div>
+            </div>
+
+            {/* Source account */}
+            <div className="mb-5">
+              <label className="text-xs text-slate-400 font-medium mb-1.5 block">Paid From Account</label>
+              <select
+                value={payFromAccountId}
+                onChange={e => setPayFromAccountId(e.target.value)}
+                className="input-base"
+              >
+                <option value="">Select account…</option>
+                {paySourceAccounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.nickname || `${a.institution_name}${a.last_four ? ` ····${a.last_four}` : ''}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* What happens next */}
+            {selectedPayment.frequency.toLowerCase() !== 'once' && (
+              <div className="text-xs text-slate-500 mb-5 flex items-start gap-2">
+                <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                <span>
+                  Next due date will advance to{' '}
+                  <span className="text-slate-300 font-medium">
+                    {fmtDateDisplay(advanceDueDate(selectedPayment.next_due_date, selectedPayment.frequency))}
+                  </span>
+                </span>
+              </div>
+            )}
+            {selectedPayment.frequency.toLowerCase() === 'once' && (
+              <div className="text-xs text-slate-500 mb-5 flex items-start gap-2">
+                <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                <span>This one-time payment will be marked as paid and removed from your schedule.</span>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={markAsPaid}
+                disabled={marking}
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+              >
+                {marking
+                  ? <><Loader2 size={14} className="animate-spin" /> Marking…</>
+                  : <><CheckCircle2 size={14} /> Mark as Paid</>}
+              </button>
+              <button onClick={closePayModal} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>
