@@ -19,21 +19,15 @@ const fmtDateDisplay = (iso: string) =>
 interface PaydayConfig {
   frequency: string          // 'weekly' | 'biweekly' | 'monthly'
   budget_per_period: number
-  anchor_date: string        // ISO date — a known payday to anchor period cadence
+  anchor_date: string        // ISO date — a known payday
 }
 
 // ── Period math ────────────────────────────────────────────────────────────
 
-function periodDays(freq: string): number {
-  if (freq === 'weekly') return 7
-  if (freq === 'biweekly') return 14
-  return 30 // monthly approximation for navigation; month arithmetic used below
-}
-
 function addPeriods(date: Date, freq: string, n: number): Date {
   const d = new Date(date)
-  const f = freq.toLowerCase()
   const sign = n >= 0 ? 1 : -1
+  const f = freq.toLowerCase()
   for (let i = 0; i < Math.abs(n); i++) {
     if (f === 'weekly') d.setDate(d.getDate() + sign * 7)
     else if (f === 'biweekly') d.setDate(d.getDate() + sign * 14)
@@ -43,7 +37,7 @@ function addPeriods(date: Date, freq: string, n: number): Date {
 }
 
 /** Returns the first period-end date >= today anchored to the given payday. */
-function currentPeriodEnd(anchor: string, freq: string): Date {
+function calcCurrentPeriodEnd(anchor: string, freq: string): Date {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   let d = new Date(anchor + 'T00:00:00')
@@ -109,9 +103,10 @@ export default function DashboardPage() {
         const allAccs = accs ?? []
         setAccounts(allAccs)
         setPayments(pmts ?? [])
-        setSourceAccounts(allAccs.filter(a =>
-          ['checking', 'savings'].includes(a.account_type.toLowerCase())
-        ))
+
+        // Prefer checking/savings for the "paid from" dropdown; fall back to all accounts
+        const src = allAccs.filter(a => ['checking', 'savings'].includes(a.account_type.toLowerCase()))
+        setSourceAccounts(src.length > 0 ? src : allAccs)
 
         const prefs = prof?.preferences as Record<string, unknown> | null
         if (prefs?.payday_planner) {
@@ -124,7 +119,7 @@ export default function DashboardPage() {
           })
         }
       } catch {
-        // Stay with empty arrays on error
+        // Stay with empty state on error
       } finally {
         setLoading(false)
       }
@@ -139,21 +134,18 @@ export default function DashboardPage() {
   const netWorth = assets - debt
   const totalRewardsValue = accounts.reduce((s, a) => s + (a.rewards_balance * a.rewards_cpp / 100), 0)
 
-  // Period window
-  const periodEndBase = paydayConfig
-    ? currentPeriodEnd(paydayConfig.anchor_date, paydayConfig.frequency)
-    : null
-  const periodEnd = periodEndBase && paydayConfig
-    ? addPeriods(periodEndBase, paydayConfig.frequency, periodOffset)
-    : null
-  const periodStart = periodEnd && paydayConfig
-    ? addPeriods(periodEnd, paydayConfig.frequency, -1)
-    : null
+  // Period window for Payday Planner
+  const periodEndBase = paydayConfig ? calcCurrentPeriodEnd(paydayConfig.anchor_date, paydayConfig.frequency) : null
+  const periodEnd = periodEndBase && paydayConfig ? addPeriods(periodEndBase, paydayConfig.frequency, periodOffset) : null
 
+  // Bills due this period: ALL payments whose due date is on or before the period-end date.
+  // This deliberately has no lower bound so overdue bills always surface.
   const periodPayments = payments.filter(p => {
-    if (!periodStart || !periodEnd) return false
+    if (!periodEnd) return false
     const due = new Date(p.next_due_date + 'T00:00:00')
-    return due > periodStart && due <= periodEnd
+    const end = new Date(periodEnd)
+    end.setHours(23, 59, 59, 999)
+    return due <= end
   })
   const periodTotal = periodPayments.reduce((s, p) => s + p.amount, 0)
   const budgetRemaining = paydayConfig ? paydayConfig.budget_per_period - periodTotal : 0
@@ -161,8 +153,7 @@ export default function DashboardPage() {
   // Account name helper
   const accountLabel = (id: string) => {
     const a = accounts.find(a => a.id === id)
-    if (!a) return null
-    return a.nickname || `${a.institution_name}${a.last_four ? ` ····${a.last_four}` : ''}`
+    return a ? (a.nickname || `${a.institution_name}${a.last_four ? ` ····${a.last_four}` : ''}`) : null
   }
 
   // ── Handlers ──
@@ -194,12 +185,7 @@ export default function DashboardPage() {
       } else {
         updates.next_due_date = advanceDueDate(selectedPayment.next_due_date, selectedPayment.frequency)
       }
-
-      const { error } = await supabase
-        .from('scheduled_payments')
-        .update(updates)
-        .eq('id', selectedPayment.id)
-
+      const { error } = await supabase.from('scheduled_payments').update(updates).eq('id', selectedPayment.id)
       if (!error) {
         if (isOneTime) {
           setPayments(ps => ps.filter(p => p.id !== selectedPayment.id))
@@ -239,7 +225,32 @@ export default function DashboardPage() {
     }
   }
 
-  // ── Render ──
+  // ── Render helpers ──
+
+  const PaymentRow = ({ p, showSource = false }: { p: ScheduledPayment; showSource?: boolean }) => (
+    <button
+      onClick={() => openPayModal(p)}
+      className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-slate-800/60 transition-colors text-left group"
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${p.auto_pay ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+        <div className="min-w-0">
+          <div className="text-sm text-slate-200 truncate">{p.payee_name ?? 'Payment'}</div>
+          <div className="text-xs text-slate-500">
+            Due {fmtDateDisplay(p.next_due_date)}
+            {p.auto_pay ? ' · Auto-pay' : ' · Manual'}
+            {showSource && accountLabel(p.from_account_id) ? ` · ${accountLabel(p.from_account_id)}` : ''}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+        <span className="text-sm font-semibold text-slate-200">{fmtDec(p.amount)}</span>
+        <CheckCircle2 size={16} className="text-slate-600 group-hover:text-emerald-400 transition-colors" />
+      </div>
+    </button>
+  )
+
+  // ── Loading ──
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -259,10 +270,10 @@ export default function DashboardPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Net Worth',    value: fmt(netWorth),         icon: Wallet,      color: '#10B981', glow: 'glow-green' },
-          { label: 'Total Assets', value: fmt(assets),           icon: TrendingUp,  color: '#6366F1', glow: 'glow-indigo' },
-          { label: 'Total Debt',   value: fmt(debt),             icon: TrendingDown, color: '#EF4444', glow: 'glow-red' },
-          { label: 'Rewards',      value: fmt(totalRewardsValue), icon: Star,        color: '#F59E0B', glow: 'glow-amber' },
+          { label: 'Net Worth',    value: fmt(netWorth),          icon: Wallet,       color: '#10B981', glow: 'glow-green' },
+          { label: 'Total Assets', value: fmt(assets),            icon: TrendingUp,   color: '#6366F1', glow: 'glow-indigo' },
+          { label: 'Total Debt',   value: fmt(debt),              icon: TrendingDown, color: '#EF4444', glow: 'glow-red' },
+          { label: 'Rewards',      value: fmt(totalRewardsValue), icon: Star,         color: '#F59E0B', glow: 'glow-amber' },
         ].map(s => (
           <div key={s.label} className={`card p-4 ${s.glow}`}>
             <div className="flex items-center justify-between mb-3">
@@ -301,145 +312,107 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Payday Planner */}
-      {paydayConfig ? (
-        <div className="card p-5">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-base font-semibold text-slate-100">Payday Planner</h2>
+      {/* Payday Planner — always shown; setup prompt when not yet configured */}
+      <div className="card p-5">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">Payday Planner</h2>
+            {paydayConfig && (
               <p className="text-xs text-slate-400 mt-0.5 capitalize">
                 {paydayConfig.frequency} · Budget {fmtDec(paydayConfig.budget_per_period)}/period
               </p>
-            </div>
-            <button
-              onClick={() => setShowConfigModal(true)}
-              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800/60"
-            >
-              <Edit2 size={12} /> Edit
-            </button>
+            )}
           </div>
-
-          {/* Period navigation */}
-          <div className="flex items-center justify-between mb-4">
-            <button
-              onClick={() => setPeriodOffset(o => o - 1)}
-              className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-200 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800/60"
-            >
-              <ChevronLeft size={16} /> Prev
-            </button>
-            <div className="text-center">
-              <div className="text-sm font-semibold text-brand-400">
-                {periodEnd ? periodEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-              </div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {periodOffset === 0 ? 'current period' : periodOffset < 0 ? `${Math.abs(periodOffset)} period${Math.abs(periodOffset) > 1 ? 's' : ''} ago` : `${periodOffset} period${periodOffset > 1 ? 's' : ''} ahead`}
-              </div>
-            </div>
-            <button
-              onClick={() => setPeriodOffset(o => o + 1)}
-              className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-200 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800/60"
-            >
-              Next <ChevronRight size={16} />
-            </button>
-          </div>
-
-          {/* Budget stats */}
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <div className="bg-slate-800/50 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-400 mb-1">Budget</div>
-              <div className="text-sm font-bold text-slate-200">{fmtDec(paydayConfig.budget_per_period)}</div>
-            </div>
-            <div className="bg-slate-800/50 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-400 mb-1">Bills Due</div>
-              <div className="text-sm font-bold text-red-400">{fmtDec(periodTotal)}</div>
-            </div>
-            <div className="bg-slate-800/50 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-400 mb-1">Remaining</div>
-              <div className={`text-sm font-bold ${budgetRemaining >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {fmtDec(budgetRemaining)}
-              </div>
-            </div>
-          </div>
-
-          {/* Payments list */}
-          {periodPayments.length === 0 ? (
-            <div className="text-center py-6 text-slate-500 text-sm">
-              No payments due this period
-            </div>
-          ) : (
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                Payments due by {periodEnd?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-              </div>
-              <div className="space-y-1">
-                {periodPayments.map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => openPayModal(p)}
-                    className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-slate-800/60 transition-colors text-left group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${p.auto_pay ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                      <div className="min-w-0">
-                        <div className="text-sm text-slate-200 truncate">{p.payee_name ?? 'Payment'}</div>
-                        <div className="text-xs text-slate-500">
-                          Due {fmtDateDisplay(p.next_due_date)}
-                          {p.auto_pay ? ' · Auto-pay' : ' · Manual'}
-                          {accountLabel(p.from_account_id) ? ` · ${accountLabel(p.from_account_id)}` : ''}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 flex-shrink-0 ml-3">
-                      <span className="text-sm font-semibold text-slate-200">{fmtDec(p.amount)}</span>
-                      <CheckCircle2 size={16} className="text-slate-600 group-hover:text-emerald-400 transition-colors" />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        /* Payday Planner setup prompt */
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-base font-semibold text-slate-100">Payday Planner</h2>
-          </div>
-          <p className="text-sm text-slate-400 mb-4">
-            Set up your payday budget to track bills per pay period and mark payments as paid.
-          </p>
           <button
             onClick={() => setShowConfigModal(true)}
-            className="btn-primary text-sm"
+            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800/60"
           >
-            Set Up Payday Planner
+            <Edit2 size={12} /> {paydayConfig ? 'Edit' : 'Set Up'}
           </button>
+        </div>
 
-          {/* Fallback: simple upcoming payments */}
-          {payments.length > 0 && (
-            <div className="mt-5 pt-5 border-t border-slate-700/50">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Upcoming Payments</div>
-              <div className="space-y-1">
-                {payments.slice(0, 5).map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => openPayModal(p)}
-                    className="w-full flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-800/60 transition-colors text-left group"
-                  >
-                    <div>
-                      <div className="text-sm text-slate-200">{p.payee_name ?? 'Payment'}</div>
-                      <div className="text-xs text-slate-500">Due {fmtDateDisplay(p.next_due_date)}</div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold text-slate-200">{fmtDec(p.amount)}</span>
-                      <CheckCircle2 size={16} className="text-slate-600 group-hover:text-emerald-400 transition-colors" />
-                    </div>
-                  </button>
-                ))}
+        {paydayConfig && periodEnd ? (
+          <>
+            {/* Period navigation */}
+            <div className="flex items-center justify-between mb-4">
+              <button
+                onClick={() => setPeriodOffset(o => o - 1)}
+                className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-200 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800/60"
+              >
+                <ChevronLeft size={16} /> Prev
+              </button>
+              <div className="text-center">
+                <div className="text-sm font-semibold text-brand-400">
+                  {periodEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {periodOffset === 0
+                    ? 'current period'
+                    : periodOffset < 0
+                      ? `${Math.abs(periodOffset)} period${Math.abs(periodOffset) > 1 ? 's' : ''} ago`
+                      : `${periodOffset} period${periodOffset > 1 ? 's' : ''} ahead`}
+                </div>
+              </div>
+              <button
+                onClick={() => setPeriodOffset(o => o + 1)}
+                className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-200 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800/60"
+              >
+                Next <ChevronRight size={16} />
+              </button>
+            </div>
+
+            {/* Budget stats */}
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-slate-800/50 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-400 mb-1">Budget</div>
+                <div className="text-sm font-bold text-slate-200">{fmtDec(paydayConfig.budget_per_period)}</div>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-400 mb-1">Bills Due</div>
+                <div className="text-sm font-bold text-red-400">{fmtDec(periodTotal)}</div>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-400 mb-1">Remaining</div>
+                <div className={`text-sm font-bold ${budgetRemaining >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {fmtDec(budgetRemaining)}
+                </div>
               </div>
             </div>
-          )}
+
+            {/* Payments due this period */}
+            {periodPayments.length === 0 ? (
+              <p className="text-center py-4 text-slate-500 text-sm">No payments due by this date</p>
+            ) : (
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                  Payments due by {periodEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </div>
+                <div className="space-y-0.5">
+                  {periodPayments.map(p => <PaymentRow key={p.id} p={p} showSource />)}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-slate-400">
+            Set up your payday budget to track bills per pay period and mark payments as paid.
+          </p>
+        )}
+      </div>
+
+      {/* All Scheduled Payments — always visible so nothing is hidden */}
+      {payments.length > 0 && (
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-slate-100">All Scheduled Payments</h2>
+            <button onClick={() => navigate('/payments')} className="text-xs text-slate-400 hover:text-slate-200 transition-colors">
+              Manage →
+            </button>
+          </div>
+          <div className="space-y-0.5">
+            {payments.map(p => <PaymentRow key={p.id} p={p} showSource />)}
+          </div>
         </div>
       )}
 
@@ -449,7 +422,7 @@ export default function DashboardPage() {
         <InvitePanel />
       </div>
 
-      {/* ── Mark as Paid Modal ─────────────────────────────────────────── */}
+      {/* ── Mark as Paid Modal ──────────────────────────────────────────── */}
       {showPayModal && selectedPayment && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
@@ -492,17 +465,11 @@ export default function DashboardPage() {
                     {a.nickname || `${a.institution_name}${a.last_four ? ` ····${a.last_four}` : ''}`}
                   </option>
                 ))}
-                {/* Allow any account if no checking/savings exist */}
-                {sourceAccounts.length === 0 && accounts.map(a => (
-                  <option key={a.id} value={a.id}>
-                    {a.nickname || `${a.institution_name}${a.last_four ? ` ····${a.last_four}` : ''}`}
-                  </option>
-                ))}
               </select>
             </div>
 
             {/* What happens next */}
-            {selectedPayment.frequency.toLowerCase() !== 'once' && (
+            {selectedPayment.frequency.toLowerCase() !== 'once' ? (
               <div className="text-xs text-slate-500 mb-5 flex items-start gap-2">
                 <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                 <span>
@@ -512,8 +479,7 @@ export default function DashboardPage() {
                   </span>
                 </span>
               </div>
-            )}
-            {selectedPayment.frequency.toLowerCase() === 'once' && (
+            ) : (
               <div className="text-xs text-slate-500 mb-5 flex items-start gap-2">
                 <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                 <span>This one-time payment will be marked as paid and removed from your schedule.</span>
@@ -546,7 +512,6 @@ export default function DashboardPage() {
                 <X size={18} />
               </button>
             </div>
-
             <div className="space-y-4">
               <div>
                 <label className="text-xs text-slate-400 font-medium mb-1.5 block">Pay Frequency</label>
@@ -576,10 +541,9 @@ export default function DashboardPage() {
                   onChange={e => setConfigForm(f => ({ ...f, anchor_date: e.target.value }))}
                   className="input-base"
                 />
-                <p className="text-xs text-slate-500 mt-1">Pick an upcoming or recent payday to anchor the pay cycle.</p>
+                <p className="text-xs text-slate-500 mt-1">Enter any upcoming payday. The planner uses it to calculate your pay cycle.</p>
               </div>
             </div>
-
             <div className="flex gap-3 mt-6">
               <button
                 onClick={savePaydayConfig}
